@@ -2,6 +2,13 @@
 .env.local
 *.log
 
+# Internal docs & notes
+prompt1.txt
+prompt2.txt
+database-model.txt
+documentation.md
+TESTING.md
+
 # IDE
 .idea/
 .vscode/
@@ -12,7 +19,3 @@
 .DS_Store
 Thumbs.db
 
-# TXT
-./prompt1.txt
-./prompt2.txt
-./database-model.txt

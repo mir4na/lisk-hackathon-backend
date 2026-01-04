@@ -10,7 +10,13 @@
     "deploy:lisk": "npx hardhat run scripts/deploy.js --network lisk",
     "node": "npx hardhat node"
   },
-  "keywords": ["nft", "invoice", "factoring", "rwa", "lisk"],
+  "keywords": [
+    "nft",
+    "invoice",
+    "factoring",
+    "rwa",
+    "lisk"
+  ],
   "author": "Receiv3",
   "license": "MIT",
   "devDependencies": {
