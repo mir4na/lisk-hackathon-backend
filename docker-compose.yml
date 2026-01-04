@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: receiv3-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=${DATABASE_URL}
+      - BLOCKCHAIN_RPC_URL=${BLOCKCHAIN_RPC_URL}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - receiv3-network
+    restart: unless-stopped
+
+  smart-contract:
+    build:
+      context: ./smart-contract
+      dockerfile: Dockerfile
+    container_name: receiv3-hardhat
+    ports:
+      - "8545:8545"
+    environment:
+      - PRIVATE_KEY=${PRIVATE_KEY}
+    networks:
+      - receiv3-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: receiv3-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-receiv3}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-receiv3}
+      - POSTGRES_DB=${POSTGRES_DB:-receiv3}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - receiv3-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: receiv3-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - receiv3-network
+    restart: unless-stopped
+
+networks:
+  receiv3-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
