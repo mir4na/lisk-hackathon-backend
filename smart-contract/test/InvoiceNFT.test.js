@@ -262,5 +262,179 @@ describe("InvoiceNFT", function () {
       const tokenId = await invoiceNFT.getTokenIdByInvoiceNumber(sampleInvoice.invoiceNumber);
       expect(tokenId).to.equal(1);
     });
+
+    it("Should return tokenURI", async function () {
+      const uri = await invoiceNFT.tokenURI(1);
+      expect(uri).to.equal(sampleInvoice.uri);
+    });
+
+    it("Should support ERC721 interface", async function () {
+      // ERC721 interface ID
+      const ERC721_INTERFACE_ID = "0x80ac58cd";
+      expect(await invoiceNFT.supportsInterface(ERC721_INTERFACE_ID)).to.be.true;
+    });
+
+    it("Should return false for isFundable on non-existent token", async function () {
+      expect(await invoiceNFT.isFundable(999)).to.be.false;
+    });
+  });
+
+  describe("Pause/Unpause", function () {
+    it("Should pause and unpause contract", async function () {
+      await invoiceNFT.pause();
+
+      await expect(
+        invoiceNFT.mintInvoice(
+          exporter.address,
+          sampleInvoice.invoiceNumber,
+          sampleInvoice.amount,
+          sampleInvoice.advanceAmount,
+          sampleInvoice.interestRate,
+          sampleInvoice.issueDate,
+          sampleInvoice.dueDate,
+          sampleInvoice.buyerCountry,
+          sampleInvoice.documentHash,
+          sampleInvoice.uri
+        )
+      ).to.be.reverted;
+
+      await invoiceNFT.unpause();
+
+      await invoiceNFT.mintInvoice(
+        exporter.address,
+        sampleInvoice.invoiceNumber,
+        sampleInvoice.amount,
+        sampleInvoice.advanceAmount,
+        sampleInvoice.interestRate,
+        sampleInvoice.issueDate,
+        sampleInvoice.dueDate,
+        sampleInvoice.buyerCountry,
+        sampleInvoice.documentHash,
+        sampleInvoice.uri
+      );
+
+      expect(await invoiceNFT.totalMinted()).to.equal(1);
+    });
+
+    it("Should not allow non-admin to pause", async function () {
+      await expect(invoiceNFT.connect(addr1).pause()).to.be.reverted;
+    });
+
+    it("Should not allow non-admin to unpause", async function () {
+      await invoiceNFT.pause();
+      await expect(invoiceNFT.connect(addr1).unpause()).to.be.reverted;
+    });
+  });
+
+  describe("Input Validation", function () {
+    it("Should reject empty invoice number", async function () {
+      await expect(
+        invoiceNFT.mintInvoice(
+          exporter.address,
+          "", // empty
+          sampleInvoice.amount,
+          sampleInvoice.advanceAmount,
+          sampleInvoice.interestRate,
+          sampleInvoice.issueDate,
+          sampleInvoice.dueDate,
+          sampleInvoice.buyerCountry,
+          sampleInvoice.documentHash,
+          sampleInvoice.uri
+        )
+      ).to.be.revertedWith("Invoice number required");
+    });
+
+    it("Should reject zero amount", async function () {
+      await expect(
+        invoiceNFT.mintInvoice(
+          exporter.address,
+          sampleInvoice.invoiceNumber,
+          0, // zero amount
+          sampleInvoice.advanceAmount,
+          sampleInvoice.interestRate,
+          sampleInvoice.issueDate,
+          sampleInvoice.dueDate,
+          sampleInvoice.buyerCountry,
+          sampleInvoice.documentHash,
+          sampleInvoice.uri
+        )
+      ).to.be.revertedWith("Amount must be positive");
+    });
+
+    it("Should reject advance amount exceeding total amount", async function () {
+      await expect(
+        invoiceNFT.mintInvoice(
+          exporter.address,
+          sampleInvoice.invoiceNumber,
+          sampleInvoice.amount,
+          sampleInvoice.amount + BigInt(1000), // advance > amount
+          sampleInvoice.interestRate,
+          sampleInvoice.issueDate,
+          sampleInvoice.dueDate,
+          sampleInvoice.buyerCountry,
+          sampleInvoice.documentHash,
+          sampleInvoice.uri
+        )
+      ).to.be.revertedWith("Advance cannot exceed amount");
+    });
+
+    it("Should reject due date before issue date", async function () {
+      await expect(
+        invoiceNFT.mintInvoice(
+          exporter.address,
+          sampleInvoice.invoiceNumber,
+          sampleInvoice.amount,
+          sampleInvoice.advanceAmount,
+          sampleInvoice.interestRate,
+          sampleInvoice.dueDate, // swapped
+          sampleInvoice.issueDate, // swapped
+          sampleInvoice.buyerCountry,
+          sampleInvoice.documentHash,
+          sampleInvoice.uri
+        )
+      ).to.be.revertedWith("Due date must be after issue date");
+    });
+  });
+
+  describe("Burning with Defaulted Status", function () {
+    beforeEach(async function () {
+      await invoiceNFT.mintInvoice(
+        exporter.address,
+        sampleInvoice.invoiceNumber,
+        sampleInvoice.amount,
+        sampleInvoice.advanceAmount,
+        sampleInvoice.interestRate,
+        sampleInvoice.issueDate,
+        sampleInvoice.dueDate,
+        sampleInvoice.buyerCountry,
+        sampleInvoice.documentHash,
+        sampleInvoice.uri
+      );
+    });
+
+    it("Should burn invoice after defaulted", async function () {
+      await invoiceNFT.updateStatus(1, 4); // Defaulted
+      await invoiceNFT.burnInvoice(1, "Defaulted - written off");
+      await expect(invoiceNFT.ownerOf(1)).to.be.reverted;
+    });
+  });
+
+  describe("Oracle Role", function () {
+    it("Should not allow non-oracle to verify shipment", async function () {
+      await invoiceNFT.mintInvoice(
+        exporter.address,
+        sampleInvoice.invoiceNumber,
+        sampleInvoice.amount,
+        sampleInvoice.advanceAmount,
+        sampleInvoice.interestRate,
+        sampleInvoice.issueDate,
+        sampleInvoice.dueDate,
+        sampleInvoice.buyerCountry,
+        sampleInvoice.documentHash,
+        sampleInvoice.uri
+      );
+
+      await expect(invoiceNFT.connect(addr1).verifyShipment(1)).to.be.reverted;
+    });
   });
 });

@@ -73,11 +73,11 @@ func (h *FundingHandler) GetPool(c *gin.Context) {
 // @Tags Funding
 // @Security BearerAuth
 // @Produce json
-// @Param invoice_id path string true "Invoice ID"
+// @Param id path string true "Invoice ID"
 // @Success 201 {object} models.FundingPool
-// @Router /invoices/{invoice_id}/pool [post]
+// @Router /invoices/{id}/pool [post]
 func (h *FundingHandler) CreatePool(c *gin.Context) {
-	invoiceID, err := uuid.Parse(c.Param("invoice_id"))
+	invoiceID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		utils.BadRequestError(c, "Invalid invoice ID")
 		return
@@ -179,12 +179,12 @@ func (h *FundingHandler) Disburse(c *gin.Context) {
 // @Security BearerAuth
 // @Accept json
 // @Produce json
-// @Param invoice_id path string true "Invoice ID"
+// @Param id path string true "Invoice ID"
 // @Param request body map[string]float64 true "Repayment amount"
 // @Success 200 {object} map[string]string
-// @Router /admin/invoices/{invoice_id}/repay [post]
+// @Router /admin/invoices/{id}/repay [post]
 func (h *FundingHandler) ProcessRepayment(c *gin.Context) {
-	invoiceID, err := uuid.Parse(c.Param("invoice_id"))
+	invoiceID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		utils.BadRequestError(c, "Invalid invoice ID")
 		return

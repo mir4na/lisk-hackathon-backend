@@ -173,8 +173,24 @@ describe("InvoicePool", function () {
     });
 
     it("Should not disburse unfilled pool", async function () {
-      await invoicePool.createPool(1);
-      await expect(invoicePool.disburse(1)).to.be.reverted;
+      // Create a new invoice (tokenId 2) with unfilled pool
+      await invoiceNFT.mintInvoice(
+        exporter.address,
+        "INV-2024-002",
+        sampleInvoice.amount,
+        sampleInvoice.advanceAmount,
+        sampleInvoice.interestRate,
+        sampleInvoice.issueDate,
+        sampleInvoice.dueDate,
+        sampleInvoice.buyerCountry,
+        sampleInvoice.documentHash,
+        sampleInvoice.uri
+      );
+      await invoiceNFT.verifyShipment(2);
+      await invoicePool.createPool(2);
+      // Only invest partial amount (not filled)
+      await invoicePool.connect(investor1).invest(2, ethers.parseUnits("1000", USDC_DECIMALS));
+      await expect(invoicePool.disburse(2)).to.be.reverted;
     });
   });
 
@@ -223,13 +239,164 @@ describe("InvoicePool", function () {
     });
 
     it("Should pause and unpause", async function () {
+      await mintAndVerifyInvoice();
+      await invoicePool.createPool(1);
+
       await invoicePool.pause();
       await expect(
         invoicePool.connect(investor1).invest(1, ethers.parseUnits("1000", USDC_DECIMALS))
       ).to.be.reverted;
 
       await invoicePool.unpause();
+
       // Should work again after unpause
+      await invoicePool.connect(investor1).invest(1, ethers.parseUnits("1000", USDC_DECIMALS));
+      const pool = await invoicePool.getPool(1);
+      expect(pool.fundedAmount).to.equal(ethers.parseUnits("1000", USDC_DECIMALS));
+    });
+
+    it("Should update platform wallet", async function () {
+      await invoicePool.setPlatformWallet(investor1.address);
+      expect(await invoicePool.platformWallet()).to.equal(investor1.address);
+    });
+
+    it("Should not allow zero address for platform wallet", async function () {
+      await expect(
+        invoicePool.setPlatformWallet(ethers.ZeroAddress)
+      ).to.be.revertedWith("Invalid address");
+    });
+
+    it("Should allow emergency withdraw", async function () {
+      // Mint some USDC to the pool contract
+      await mockUSDC.mint(await invoicePool.getAddress(), ethers.parseUnits("1000", USDC_DECIMALS));
+
+      const ownerBalanceBefore = await mockUSDC.balanceOf(owner.address);
+      await invoicePool.emergencyWithdraw(await mockUSDC.getAddress(), ethers.parseUnits("1000", USDC_DECIMALS));
+      const ownerBalanceAfter = await mockUSDC.balanceOf(owner.address);
+
+      expect(ownerBalanceAfter - ownerBalanceBefore).to.equal(ethers.parseUnits("1000", USDC_DECIMALS));
+    });
+
+    it("Should not allow non-admin to set platform fee", async function () {
+      await expect(invoicePool.connect(investor1).setPlatformFee(300)).to.be.reverted;
+    });
+
+    it("Should not allow non-admin to pause", async function () {
+      await expect(invoicePool.connect(investor1).pause()).to.be.reverted;
+    });
+
+    it("Should not allow non-admin to unpause", async function () {
+      await invoicePool.pause();
+      await expect(invoicePool.connect(investor1).unpause()).to.be.reverted;
+    });
+  });
+
+  describe("Pool Queries", function () {
+    it("Should return zero remaining capacity for non-Open pool", async function () {
+      await mintAndVerifyInvoice();
+      await invoicePool.createPool(1);
+      await invoicePool.connect(investor1).invest(1, ethers.parseUnits("8000", USDC_DECIMALS));
+      await invoicePool.disburse(1);
+
+      const remaining = await invoicePool.getRemainingCapacity(1);
+      expect(remaining).to.equal(0);
+    });
+
+    it("Should return correct remaining capacity for Open pool", async function () {
+      await mintAndVerifyInvoice();
+      await invoicePool.createPool(1);
+      await invoicePool.connect(investor1).invest(1, ethers.parseUnits("3000", USDC_DECIMALS));
+
+      const remaining = await invoicePool.getRemainingCapacity(1);
+      expect(remaining).to.equal(ethers.parseUnits("5000", USDC_DECIMALS));
+    });
+
+    it("Should get investor pools", async function () {
+      await mintAndVerifyInvoice();
+      await invoicePool.createPool(1);
+      await invoicePool.connect(investor1).invest(1, ethers.parseUnits("3000", USDC_DECIMALS));
+
+      const pools = await invoicePool.getInvestorPools(investor1.address);
+      expect(pools.length).to.equal(1);
+    });
+  });
+
+  describe("Pool Creation Edge Cases", function () {
+    it("Should not create pool twice for same invoice", async function () {
+      await mintAndVerifyInvoice();
+      await invoicePool.createPool(1);
+
+      // The invoice is no longer fundable after pool is created (status changed)
+      // So it will fail with "Invoice not fundable" first
+      await expect(invoicePool.createPool(1)).to.be.reverted;
+    });
+
+    it("Should not allow non-operator to create pool", async function () {
+      await mintAndVerifyInvoice();
+      await expect(invoicePool.connect(investor1).createPool(1)).to.be.reverted;
+    });
+  });
+
+  describe("Investment Edge Cases", function () {
+    beforeEach(async function () {
+      await mintAndVerifyInvoice();
+      await invoicePool.createPool(1);
+    });
+
+    it("Should not allow zero investment", async function () {
+      await expect(
+        invoicePool.connect(investor1).invest(1, 0)
+      ).to.be.revertedWith("Amount must be positive");
+    });
+
+    it("Should not allow investment in non-existent pool", async function () {
+      await expect(
+        invoicePool.connect(investor1).invest(999, ethers.parseUnits("1000", USDC_DECIMALS))
+      ).to.be.revertedWith("Pool does not exist");
+    });
+
+    it("Should not allow investment in filled pool", async function () {
+      await invoicePool.connect(investor1).invest(1, ethers.parseUnits("8000", USDC_DECIMALS));
+
+      await expect(
+        invoicePool.connect(investor2).invest(1, ethers.parseUnits("1000", USDC_DECIMALS))
+      ).to.be.revertedWith("Pool not open");
+    });
+  });
+
+  describe("Disbursement Edge Cases", function () {
+    it("Should not allow non-operator to disburse", async function () {
+      await mintAndVerifyInvoice();
+      await invoicePool.createPool(1);
+      await invoicePool.connect(investor1).invest(1, ethers.parseUnits("8000", USDC_DECIMALS));
+
+      await expect(invoicePool.connect(investor1).disburse(1)).to.be.reverted;
+    });
+  });
+
+  describe("Repayment Edge Cases", function () {
+    it("Should not allow repayment on non-disbursed pool", async function () {
+      await mintAndVerifyInvoice();
+      await invoicePool.createPool(1);
+      await invoicePool.connect(investor1).invest(1, ethers.parseUnits("8000", USDC_DECIMALS));
+
+      await mockUSDC.mint(owner.address, ethers.parseUnits("10000", USDC_DECIMALS));
+      await mockUSDC.approve(await invoicePool.getAddress(), ethers.parseUnits("10000", USDC_DECIMALS));
+
+      await expect(
+        invoicePool.processRepayment(1, ethers.parseUnits("10000", USDC_DECIMALS))
+      ).to.be.revertedWith("Pool not disbursed");
+    });
+
+    it("Should not allow non-operator to process repayment", async function () {
+      await mintAndVerifyInvoice();
+      await invoicePool.createPool(1);
+      await invoicePool.connect(investor1).invest(1, ethers.parseUnits("8000", USDC_DECIMALS));
+      await invoicePool.disburse(1);
+
+      await expect(
+        invoicePool.connect(investor1).processRepayment(1, ethers.parseUnits("10000", USDC_DECIMALS))
+      ).to.be.reverted;
     });
   });
 });

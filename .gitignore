@@ -5,7 +5,7 @@
 # Internal docs & notes
 prompt1.txt
 prompt2.txt
-database-model.txt
+database.txt
 documentation.md
 TESTING.md
 
@@ -19,3 +19,9 @@ TESTING.md
 .DS_Store
 Thumbs.db
 
+# Smart Contract build & deps
+smart-contract/node_modules/
+smart-contract/artifacts/
+smart-contract/cache/
+smart-contract/coverage/
+smart-contract/typechain-types/

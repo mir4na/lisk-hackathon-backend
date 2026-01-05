@@ -5,10 +5,12 @@
   "scripts": {
     "compile": "npx hardhat compile",
     "test": "npx hardhat test",
+    "test:coverage": "npx hardhat coverage",
+    "test:gas": "REPORT_GAS=true npx hardhat test",
     "deploy:local": "npx hardhat run scripts/deploy.js --network hardhat",
-    "deploy:lisk-sepolia": "npx hardhat run scripts/deploy.js --network lisk_sepolia",
-    "deploy:lisk": "npx hardhat run scripts/deploy.js --network lisk",
-    "node": "npx hardhat node"
+    "deploy:sepolia": "npx hardhat run scripts/deploy.js --network lisk_sepolia",
+    "node": "npx hardhat node",
+    "verify": "npx hardhat verify --network lisk_sepolia"
   },
   "keywords": [
     "nft",
@@ -20,9 +22,9 @@
   "author": "Receiv3",
   "license": "MIT",
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
-    "@openzeppelin/contracts": "^5.4.0",
-    "dotenv": "^17.2.3",
-    "hardhat": "^3.1.2"
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "^5.0.2",
+    "dotenv": "^16.4.5",
+    "hardhat": "^2.22.0"
   }
 }

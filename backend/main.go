@@ -168,7 +168,7 @@ func main() {
 				admin.POST("/invoices/:id/approve", invoiceHandler.Approve)
 				admin.POST("/invoices/:id/reject", invoiceHandler.Reject)
 				admin.POST("/pools/:id/disburse", fundingHandler.Disburse)
-				admin.POST("/invoices/:invoice_id/repay", fundingHandler.ProcessRepayment)
+				admin.POST("/invoices/:id/repay", fundingHandler.ProcessRepayment)
 			}
 		}
 	}

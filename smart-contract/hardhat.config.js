@@ -1,5 +1,5 @@
 require("@nomicfoundation/hardhat-toolbox");
-require("dotenv").config();
+require("dotenv").config({ path: "../.env" });
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -12,6 +12,10 @@ module.exports = {
       },
     },
   },
+  // =============================================================================
+  // IMPORTANT: This project is configured for Lisk Sepolia testnet ONLY
+  // Get testnet ETH from: https://sepolia-faucet.lisk.com/
+  // =============================================================================
   networks: {
     hardhat: {
       chainId: 31337,
@@ -21,16 +25,10 @@ module.exports = {
       chainId: 4202,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
     },
-    lisk: {
-      url: process.env.LISK_RPC_URL || "https://rpc.api.lisk.com",
-      chainId: 1135,
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
-    },
   },
   etherscan: {
     apiKey: {
       lisk_sepolia: "placeholder",
-      lisk: "placeholder",
     },
     customChains: [
       {
@@ -39,14 +37,6 @@ module.exports = {
         urls: {
           apiURL: "https://sepolia-blockscout.lisk.com/api",
           browserURL: "https://sepolia-blockscout.lisk.com",
-        },
-      },
-      {
-        network: "lisk",
-        chainId: 1135,
-        urls: {
-          apiURL: "https://blockscout.lisk.com/api",
-          browserURL: "https://blockscout.lisk.com",
         },
       },
     ],
