@@ -1,0 +1,11 @@
+{
+  "network": "lisk_sepolia",
+  "chainId": "4202",
+  "deployer": "0x1c2C3A17681B9867F9Dea261A22f7cB55dF6B42A",
+  "contracts": {
+    "MockUSDC": "0x8744A0faC2E79a035dC63568bF98DA1cB84866FF",
+    "InvoiceNFT": "0xAb8CF098D5638063C439787Ad34cc6be11Ed29e1",
+    "InvoicePool": "0xC192126Df7745Ed1ADFAbb1C3d837070DDaa8067"
+  },
+  "deployedAt": "2026-01-05T13:04:59.422Z"
+}
