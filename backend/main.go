@@ -65,9 +65,11 @@ func main() {
 	authService := services.NewAuthService(userRepo, jwtManager, otpService)
 	mitraService := services.NewMitraService(mitraRepo, userRepo, emailService, pinataService)
 	invoiceService := services.NewInvoiceService(invoiceRepo, buyerRepo, fundingRepo, pinataService, cfg)
+	invoiceService.SetUserRepo(userRepo) // Set user repo for grade suggestion
 	fundingService := services.NewFundingService(fundingRepo, invoiceRepo, txRepo, userRepo, buyerRepo, rqRepo, emailService, escrowService, cfg)
-	paymentService := services.NewPaymentService(userRepo, txRepo)
+	paymentService := services.NewPaymentService(userRepo, txRepo, fundingRepo, invoiceRepo) // Updated with fundingRepo and invoiceRepo for Flow 3
 	rqService := services.NewRiskQuestionnaireService(rqRepo)
+	currencyService := services.NewCurrencyService(cfg)
 	blockchainService, err := services.NewBlockchainService(cfg, invoiceRepo, pinataService)
 	if err != nil {
 		log.Printf("Warning: Blockchain service init failed: %v", err)
@@ -83,9 +85,7 @@ func main() {
 	paymentHandler := handlers.NewPaymentHandler(paymentService)
 	importerHandler := handlers.NewImporterHandler(importerPaymentRepo, fundingService, fundingRepo, invoiceRepo)
 	rqHandler := handlers.NewRiskQuestionnaireHandler(rqService)
-
-	// Initialize wallet middleware
-	walletMiddleware := middleware.NewWalletMiddleware(userRepo)
+	currencyHandler := handlers.NewCurrencyHandler(currencyService)
 
 	// Initialize Gin router
 	router := gin.Default()
@@ -137,18 +137,32 @@ func main() {
 			{
 				user.GET("/profile", userHandler.GetProfile)
 				user.PUT("/profile", userHandler.UpdateProfile)
-				user.PUT("/wallet", userHandler.UpdateWallet)
 				user.POST("/kyc", userHandler.SubmitKYC)
 				user.GET("/kyc", userHandler.GetKYCStatus)
 				user.GET("/balance", paymentHandler.GetBalance)
 
-				// MITRA application routes
+				// Profile Management (Flow: MANAGEMENT PROFIL USER)
+				user.GET("/profile/data", userHandler.GetPersonalData)           // Data Diri (Read-only)
+				user.GET("/profile/bank-account", userHandler.GetBankAccount)    // Rekening Bank
+				user.PUT("/profile/bank-account", userHandler.ChangeBankAccount) // Ubah Rekening (OTP required)
+				user.PUT("/profile/password", userHandler.ChangePassword)        // Keamanan - Ubah Password
+				user.GET("/profile/banks", userHandler.GetSupportedBanks)        // List supported banks
+
+				// MITRA application routes (Flow 2)
 				mitra := user.Group("/mitra")
 				{
 					mitra.POST("/apply", mitraHandler.Apply)
 					mitra.GET("/status", mitraHandler.GetStatus)
 					mitra.POST("/documents", mitraHandler.UploadDocument)
 				}
+			}
+
+			// Currency conversion routes (Flow 4 - BE-4)
+			currency := protected.Group("/currency")
+			{
+				currency.POST("/convert", currencyHandler.GetLockedExchangeRate)
+				currency.GET("/supported", currencyHandler.GetSupportedCurrencies)
+				currency.GET("/disbursement-estimate", currencyHandler.CalculateEstimatedDisbursement)
 			}
 
 			// Payment routes (PROTOTYPE)
@@ -170,11 +184,13 @@ func main() {
 				buyers.DELETE("/:id", buyerHandler.Delete)
 			}
 
-			// Invoice routes (exporter only for CRUD)
+			// Invoice routes (exporter/mitra for CRUD)
 			invoices := protected.Group("/invoices")
 			{
-				// Exporter routes - require wallet for blockchain operations
-				invoices.POST("", middleware.ExporterOnly(), walletMiddleware.RequireWallet(), invoiceHandler.Create)
+				// Mitra/Exporter routes
+				invoices.POST("", middleware.ExporterOnly(), invoiceHandler.Create)
+				invoices.POST("/funding-request", middleware.ExporterOnly(), invoiceHandler.CreateFundingRequest) // Flow 4
+				invoices.POST("/check-repeat-buyer", middleware.ExporterOnly(), invoiceHandler.CheckRepeatBuyer)  // Flow 4 Pre-condition
 				invoices.GET("", middleware.ExporterOnly(), invoiceHandler.List)
 				invoices.GET("/fundable", invoiceHandler.ListFundable) // Open to all
 				invoices.GET("/:id", invoiceHandler.Get)
@@ -194,10 +210,12 @@ func main() {
 				pools.GET("/:id", fundingHandler.GetPool)
 			}
 
-			// Marketplace routes (with filters)
+			// Marketplace routes (with filters) - Flow 6
 			marketplace := protected.Group("/marketplace")
 			{
 				marketplace.GET("", fundingHandler.GetMarketplace)
+				marketplace.GET("/:id/detail", fundingHandler.GetPoolDetail)       // Pool detail for investor
+				marketplace.POST("/calculate", fundingHandler.CalculateInvestment) // Investment calculator
 			}
 
 			// Risk Questionnaire routes (for investors)
@@ -209,27 +227,38 @@ func main() {
 				riskQuestionnaire.GET("/status", rqHandler.GetStatus)
 			}
 
-			// Investment routes - require wallet for blockchain transparency
+			// Investment routes (Flow 6, 9, 10)
 			investments := protected.Group("/investments")
-			investments.Use(middleware.InvestorOnly(), walletMiddleware.RequireWallet())
+			investments.Use(middleware.InvestorOnly())
 			{
 				investments.POST("", fundingHandler.Invest)
+				investments.POST("/confirm", fundingHandler.ConfirmInvestment) // Flow 6 confirmation
 				investments.GET("", fundingHandler.GetMyInvestments)
-				investments.GET("/portfolio", fundingHandler.GetPortfolio)
+				investments.GET("/portfolio", fundingHandler.GetPortfolio)      // Flow 9
+				investments.GET("/active", fundingHandler.GetActiveInvestments) // Flow 10
 			}
 
-			// Exporter routes
+			// Exporter/Mitra routes (Flow 8, 11)
 			exporter := protected.Group("/exporter")
 			exporter.Use(middleware.ExporterOnly())
 			{
-				exporter.POST("/disbursement", fundingHandler.ExporterDisbursement)
+				exporter.POST("/disbursement", fundingHandler.ExporterDisbursement) // Flow 11
 			}
 
-			// Mitra Dashboard
+			// Mitra Dashboard (Flow 8)
 			mitraDashboard := protected.Group("/mitra")
 			mitraDashboard.Use(middleware.ExporterOnly())
 			{
 				mitraDashboard.GET("/dashboard", fundingHandler.GetMitraDashboard)
+				mitraDashboard.GET("/invoices", fundingHandler.GetMitraActiveInvoices)
+
+				// Mitra Repayment (Flow: MITRA MEMBAYAR HUTANG)
+				mitraDashboard.GET("/invoices/active", mitraHandler.GetActiveInvoices)                // Active invoices needing repayment
+				mitraDashboard.GET("/pools/:id/breakdown", mitraHandler.GetRepaymentBreakdown)        // Repayment breakdown by tranche
+				mitraDashboard.GET("/payment-methods", mitraHandler.GetVAPaymentMethods)              // Available VA banks
+				mitraDashboard.POST("/repayment/va", mitraHandler.CreateVAPayment)                    // Create VA for payment
+				mitraDashboard.GET("/repayment/va/:id", mitraHandler.GetVAPaymentStatus)              // VA payment page details
+				mitraDashboard.POST("/repayment/va/:id/simulate-pay", mitraHandler.SimulateVAPayment) // MVP: Simulate payment
 			}
 
 			// Admin routes
@@ -239,13 +268,20 @@ func main() {
 				admin.GET("/kyc/pending", userHandler.GetPendingKYC)
 				admin.POST("/kyc/:id/approve", userHandler.ApproveKYC)
 				admin.POST("/kyc/:id/reject", userHandler.RejectKYC)
-				admin.POST("/invoices/:id/approve", invoiceHandler.Approve)
+
+				// Invoice approval routes (Flow 5)
+				admin.GET("/invoices/pending", invoiceHandler.GetPendingInvoices)              // List pending for review
+				admin.GET("/invoices/:id/grade-suggestion", invoiceHandler.GetGradeSuggestion) // BE-ADM-1 logic
+				admin.GET("/invoices/:id/review", invoiceHandler.GetInvoiceReviewData)         // Split-screen data
+				admin.POST("/invoices/:id/approve", invoiceHandler.Approve)                    // Approve with grade
 				admin.POST("/invoices/:id/reject", invoiceHandler.Reject)
+
+				// Pool management
 				admin.POST("/pools/:id/disburse", fundingHandler.Disburse)
 				admin.POST("/pools/:id/close", fundingHandler.ClosePoolAndNotify)
 				admin.POST("/invoices/:id/repay", fundingHandler.ProcessRepayment)
 
-				// Admin Mitra Application routes
+				// Admin Mitra Application routes (Flow 2)
 				admin.GET("/mitra/pending", mitraHandler.GetPendingApplications)
 				admin.POST("/mitra/:id/approve", mitraHandler.Approve)
 				admin.POST("/mitra/:id/reject", mitraHandler.Reject)

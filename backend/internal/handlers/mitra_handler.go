@@ -313,3 +313,145 @@ func (h *MitraHandler) Reject(c *gin.Context) {
 		"message": "MITRA application rejected",
 	})
 }
+
+// ==================== Mitra Repayment Flow (Flow: MITRA MEMBAYAR HUTANG) ====================
+
+// GetActiveInvoices godoc
+// @Summary Get mitra's active invoices with repayment status
+// @Description Get list of active invoices that mitra needs to repay
+// @Tags MITRA Repayment
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {array} models.MitraActiveInvoice
+// @Router /mitra/invoices/active [get]
+func (h *MitraHandler) GetActiveInvoices(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	invoices, err := h.mitraService.GetActiveInvoicesForRepayment(userID)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, invoices)
+}
+
+// GetRepaymentBreakdown godoc
+// @Summary Get repayment breakdown for a pool
+// @Description Get detailed breakdown of repayment by tranche (Priority + Catalyst)
+// @Tags MITRA Repayment
+// @Security BearerAuth
+// @Produce json
+// @Param id path string true "Pool ID"
+// @Success 200 {object} models.MitraRepaymentBreakdown
+// @Router /mitra/pools/{id}/breakdown [get]
+func (h *MitraHandler) GetRepaymentBreakdown(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+	poolID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		utils.BadRequestError(c, "Invalid pool ID")
+		return
+	}
+
+	breakdown, err := h.mitraService.GetRepaymentBreakdown(userID, poolID)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, breakdown)
+}
+
+// GetVAPaymentMethods godoc
+// @Summary Get available VA payment methods
+// @Description Get list of banks available for VA payment
+// @Tags MITRA Repayment
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {array} models.VAPaymentMethodOption
+// @Router /mitra/payment-methods [get]
+func (h *MitraHandler) GetVAPaymentMethods(c *gin.Context) {
+	methods := models.GetVAPaymentMethods()
+	utils.SuccessResponse(c, methods)
+}
+
+// CreateVAPayment godoc
+// @Summary Create VA for repayment
+// @Description Create a Virtual Account for mitra to pay back investors
+// @Tags MITRA Repayment
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body models.CreateVARequest true "VA creation request"
+// @Success 201 {object} models.VAPaymentResponse
+// @Router /mitra/repayment/va [post]
+func (h *MitraHandler) CreateVAPayment(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req models.CreateVARequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestError(c, err.Error())
+		return
+	}
+
+	response, err := h.mitraService.CreateVAPayment(userID, &req)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.CreatedResponse(c, response)
+}
+
+// GetVAPaymentStatus godoc
+// @Summary Get VA payment page details
+// @Description Get VA payment details with timer for payment page
+// @Tags MITRA Repayment
+// @Security BearerAuth
+// @Produce json
+// @Param id path string true "VA ID"
+// @Success 200 {object} models.VAPaymentPageResponse
+// @Router /mitra/repayment/va/{id} [get]
+func (h *MitraHandler) GetVAPaymentStatus(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+	vaID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		utils.BadRequestError(c, "Invalid VA ID")
+		return
+	}
+
+	response, err := h.mitraService.GetVAPaymentStatus(userID, vaID)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, response)
+}
+
+// SimulateVAPayment godoc
+// @Summary Simulate VA payment (MVP/Testing)
+// @Description Simulate receiving VA payment - for testing purposes only
+// @Tags MITRA Repayment
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param id path string true "VA ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /mitra/repayment/va/{id}/simulate-pay [post]
+func (h *MitraHandler) SimulateVAPayment(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+	vaID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		utils.BadRequestError(c, "Invalid VA ID")
+		return
+	}
+
+	result, err := h.mitraService.SimulateVAPayment(userID, vaID)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, result)
+}

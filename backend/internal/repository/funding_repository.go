@@ -54,7 +54,7 @@ func (r *FundingRepository) FindPoolByID(id uuid.UUID) (*models.FundingPool, err
 		       COALESCE(priority_target, 0), COALESCE(priority_funded, 0),
 		       COALESCE(catalyst_target, 0), COALESCE(catalyst_funded, 0),
 		       COALESCE(priority_interest_rate, 0), COALESCE(catalyst_interest_rate, 0),
-		       COALESCE(pool_currency, 'IDRX')
+		       COALESCE(pool_currency, 'IDR')
 		FROM funding_pools
 		WHERE id = $1
 	`
@@ -97,7 +97,7 @@ func (r *FundingRepository) FindPoolByInvoiceID(invoiceID uuid.UUID) (*models.Fu
 		       COALESCE(priority_target, 0), COALESCE(priority_funded, 0),
 		       COALESCE(catalyst_target, 0), COALESCE(catalyst_funded, 0),
 		       COALESCE(priority_interest_rate, 0), COALESCE(catalyst_interest_rate, 0),
-		       COALESCE(pool_currency, 'IDRX')
+		       COALESCE(pool_currency, 'IDR')
 		FROM funding_pools
 		WHERE invoice_id = $1
 	`
@@ -146,7 +146,7 @@ func (r *FundingRepository) FindOpenPools(page, perPage int) ([]models.FundingPo
 		       COALESCE(fp.priority_target, 0), COALESCE(fp.priority_funded, 0),
 		       COALESCE(fp.catalyst_target, 0), COALESCE(fp.catalyst_funded, 0),
 		       COALESCE(fp.priority_interest_rate, 0), COALESCE(fp.catalyst_interest_rate, 0),
-		       COALESCE(fp.pool_currency, 'IDRX')
+		       COALESCE(fp.pool_currency, 'IDR')
 		FROM funding_pools fp
 		WHERE fp.status = 'open'
 		ORDER BY fp.opened_at DESC
@@ -309,6 +309,53 @@ func (r *FundingRepository) FindInvestmentsByInvestor(investorID uuid.UUID, page
 		       COALESCE(tranche, 'priority'), tx_hash, invested_at, repaid_at, created_at, updated_at
 		FROM investments
 		WHERE investor_id = $1
+		ORDER BY invested_at DESC
+		LIMIT $2 OFFSET $3
+	`
+	rows, err := r.db.Query(query, investorID, perPage, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var investments []models.Investment
+	for rows.Next() {
+		var inv models.Investment
+		if err := rows.Scan(
+			&inv.ID,
+			&inv.PoolID,
+			&inv.InvestorID,
+			&inv.Amount,
+			&inv.ExpectedReturn,
+			&inv.ActualReturn,
+			&inv.Status,
+			&inv.Tranche,
+			&inv.TxHash,
+			&inv.InvestedAt,
+			&inv.RepaidAt,
+			&inv.CreatedAt,
+			&inv.UpdatedAt,
+		); err != nil {
+			return nil, 0, err
+		}
+		investments = append(investments, inv)
+	}
+	return investments, total, nil
+}
+
+func (r *FundingRepository) FindActiveInvestmentsByInvestor(investorID uuid.UUID, page, perPage int) ([]models.Investment, int, error) {
+	var total int
+	countQuery := `SELECT COUNT(*) FROM investments WHERE investor_id = $1 AND status = 'active'`
+	if err := r.db.QueryRow(countQuery, investorID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * perPage
+	query := `
+		SELECT id, pool_id, investor_id, amount, expected_return, actual_return, status,
+		       COALESCE(tranche, 'priority'), tx_hash, invested_at, repaid_at, created_at, updated_at
+		FROM investments
+		WHERE investor_id = $1 AND status = 'active'
 		ORDER BY invested_at DESC
 		LIMIT $2 OFFSET $3
 	`

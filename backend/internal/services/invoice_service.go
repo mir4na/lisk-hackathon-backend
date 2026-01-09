@@ -14,6 +14,7 @@ type InvoiceService struct {
 	invoiceRepo repository.InvoiceRepositoryInterface
 	buyerRepo   repository.BuyerRepositoryInterface
 	fundingRepo repository.FundingRepositoryInterface
+	userRepo    repository.UserRepositoryInterface
 	pinata      PinataServiceInterface
 	cfg         *config.Config
 }
@@ -32,6 +33,158 @@ func NewInvoiceService(
 		pinata:      pinata,
 		cfg:         cfg,
 	}
+}
+
+// SetUserRepo sets the user repository (for avoiding circular dependency)
+func (s *InvoiceService) SetUserRepo(userRepo repository.UserRepositoryInterface) {
+	s.userRepo = userRepo
+}
+
+// CheckRepeatBuyer checks if buyer is a repeat buyer based on transaction history (Flow 4 Pre-condition)
+func (s *InvoiceService) CheckRepeatBuyer(mitraID uuid.UUID, buyerCompanyName string) (*models.RepeatBuyerCheckResponse, error) {
+	// Find buyer by company name
+	buyer, err := s.buyerRepo.FindByCompanyName(buyerCompanyName, mitraID)
+	if err != nil {
+		return nil, err
+	}
+
+	if buyer == nil {
+		// New buyer - 60% funding limit
+		return &models.RepeatBuyerCheckResponse{
+			IsRepeatBuyer:        false,
+			Message:              "⚠️ Untuk kemitraan baru, maksimal pembiayaan yang dapat dicairkan adalah 60% dari nilai tagihan.",
+			PreviousTransactions: 0,
+			FundingLimit:         60.0,
+		}, nil
+	}
+
+	// Check if buyer has completed transactions
+	if buyer.TotalPaid > 0 {
+		return &models.RepeatBuyerCheckResponse{
+			IsRepeatBuyer:        true,
+			Message:              "✅ Riwayat transaksi terverifikasi. Repeat Order (Verified by System).",
+			PreviousTransactions: buyer.TotalInvoices,
+			FundingLimit:         100.0,
+		}, nil
+	}
+
+	// Buyer exists but no completed transactions
+	return &models.RepeatBuyerCheckResponse{
+		IsRepeatBuyer:        false,
+		Message:              "⚠️ Untuk kemitraan baru, maksimal pembiayaan yang dapat dicairkan adalah 60% dari nilai tagihan.",
+		PreviousTransactions: buyer.TotalInvoices,
+		FundingLimit:         60.0,
+	}, nil
+}
+
+// CreateFundingRequest creates a new invoice funding request (Flow 4)
+func (s *InvoiceService) CreateFundingRequest(mitraID uuid.UUID, req *models.CreateInvoiceFundingRequest) (*models.Invoice, error) {
+	// Validate funding duration
+	fundingDurationDays := req.FundingDurationDays
+	if fundingDurationDays <= 0 {
+		fundingDurationDays = 14 // Default 14 days
+	}
+
+	// Validate tranche ratios
+	priorityRatio := req.PriorityRatio
+	catalystRatio := req.CatalystRatio
+	if priorityRatio <= 0 {
+		priorityRatio = 80.0
+	}
+	if catalystRatio <= 0 {
+		catalystRatio = 20.0
+	}
+	if priorityRatio+catalystRatio != 100 {
+		return nil, errors.New("priority and catalyst ratios must sum to 100%")
+	}
+
+	// Parse due date
+	dueDate, err := time.Parse("2006-01-02", req.DueDate)
+	if err != nil {
+		return nil, errors.New("invalid due date format (use YYYY-MM-DD)")
+	}
+
+	if dueDate.Before(time.Now()) {
+		return nil, errors.New("due date must be in the future")
+	}
+
+	// Check repeat buyer and get funding limit
+	repeatCheck, err := s.CheckRepeatBuyer(mitraID, req.BuyerCompanyName)
+	if err != nil {
+		return nil, err
+	}
+
+	fundingLimitPercentage := repeatCheck.FundingLimit
+	if !req.IsRepeatBuyer && repeatCheck.IsRepeatBuyer {
+		// System detected repeat buyer
+		fundingLimitPercentage = 100.0
+	} else if req.IsRepeatBuyer && !repeatCheck.IsRepeatBuyer && req.RepeatBuyerProof == "" {
+		// User claims repeat but system doesn't detect - require proof
+		return nil, errors.New("please upload proof of previous transactions for repeat buyer claim")
+	}
+
+	// Find or create buyer
+	var buyer *models.Buyer
+	existingBuyer, _ := s.buyerRepo.FindByCompanyName(req.BuyerCompanyName, mitraID)
+	if existingBuyer != nil {
+		buyer = existingBuyer
+	} else {
+		// Create new buyer
+		buyer = &models.Buyer{
+			CreatedBy:    mitraID,
+			CompanyName:  req.BuyerCompanyName,
+			Country:      req.BuyerCountry,
+			ContactEmail: &req.BuyerEmail,
+		}
+		if err := s.buyerRepo.Create(buyer); err != nil {
+			return nil, err
+		}
+	}
+
+	// Calculate advance amount based on funding limit
+	advanceAmount := req.IDRAmount * (fundingLimitPercentage / 100)
+
+	// Create invoice
+	invoice := &models.Invoice{
+		ExporterID:        mitraID,
+		BuyerID:           buyer.ID,
+		InvoiceNumber:     req.InvoiceNumber,
+		Currency:          "IDR",
+		Amount:            req.IDRAmount,
+		IssueDate:         time.Now(),
+		DueDate:           dueDate,
+		Description:       req.Description,
+		Status:            models.StatusDraft,
+		AdvancePercentage: fundingLimitPercentage,
+		AdvanceAmount:     &advanceAmount,
+
+		// Currency conversion fields
+		OriginalCurrency: &req.OriginalCurrency,
+		OriginalAmount:   &req.OriginalAmount,
+		IDRAmount:        &req.IDRAmount,
+		ExchangeRate:     &req.LockedExchangeRate,
+		BufferRate:       s.cfg.DefaultBufferRate,
+
+		// Tranche configuration
+		PriorityRatio:        priorityRatio,
+		CatalystRatio:        catalystRatio,
+		PriorityInterestRate: &req.PriorityInterestRate,
+		CatalystInterestRate: &req.CatalystInterestRate,
+
+		// Repeat buyer info
+		IsRepeatBuyer:          repeatCheck.IsRepeatBuyer || req.IsRepeatBuyer,
+		FundingLimitPercentage: fundingLimitPercentage,
+
+		// Funding duration
+		FundingDurationDays: fundingDurationDays,
+	}
+
+	if err := s.invoiceRepo.Create(invoice); err != nil {
+		return nil, err
+	}
+
+	invoice.Buyer = buyer
+	return invoice, nil
 }
 
 func (s *InvoiceService) Create(exporterID uuid.UUID, req *models.CreateInvoiceRequest) (*models.Invoice, error) {
@@ -311,4 +464,249 @@ func (s *InvoiceService) GetDocuments(invoiceID uuid.UUID) ([]models.InvoiceDocu
 func (s *InvoiceService) DeleteDocument(docID, exporterID uuid.UUID) error {
 	// Would need to verify ownership through invoice
 	return s.invoiceRepo.DeleteDocument(docID)
+}
+
+// GetGradeSuggestion implements BE-ADM-1 logic for grade suggestion
+func (s *InvoiceService) GetGradeSuggestion(invoiceID uuid.UUID) (*models.AdminGradeSuggestionResponse, error) {
+	invoice, err := s.invoiceRepo.FindByID(invoiceID)
+	if err != nil {
+		return nil, err
+	}
+	if invoice == nil {
+		return nil, errors.New("invoice not found")
+	}
+
+	// Get buyer info
+	buyer, err := s.buyerRepo.FindByID(invoice.BuyerID)
+	if err != nil {
+		return nil, err
+	}
+	if buyer == nil {
+		return nil, errors.New("buyer not found")
+	}
+
+	// Get documents for completeness check
+	docs, _ := s.invoiceRepo.FindDocumentsByInvoiceID(invoiceID)
+	documentCount := len(docs)
+
+	// Get exporter invoice count for history
+	exporterInvoiceCount, _ := s.invoiceRepo.CountByExporter(invoice.ExporterID)
+
+	// Calculate scores using grading logic
+	score := 0
+	countryRisk := "medium"
+
+	// 1. Country Risk Score (40 points max)
+	countryScore := 25 // Default medium
+	countryTier := 2
+	if tier, ok := CountryRiskTier[buyer.Country]; ok {
+		countryTier = tier
+	}
+
+	switch countryTier {
+	case 1:
+		countryScore = 40
+		countryRisk = "low"
+	case 2:
+		countryScore = 25
+		countryRisk = "medium"
+	case 3:
+		countryScore = 10
+		countryRisk = "high"
+	}
+	score += countryScore
+
+	// 2. History Score (30 points max)
+	historyScore := 10 // Default for first time
+	isRepeatBuyer := buyer.TotalPaid > 0 || invoice.IsRepeatBuyer
+	if isRepeatBuyer {
+		historyScore = 30
+	} else if exporterInvoiceCount >= 1 {
+		historyScore = 20
+	}
+	score += historyScore
+
+	// 3. Document Completeness Score (30 points max)
+	documentScore := 5
+	documentsComplete := false
+	if documentCount >= 3 {
+		documentScore = 30
+		documentsComplete = true
+	} else if documentCount >= 1 {
+		documentScore = 20
+	}
+	score += documentScore
+
+	// Determine grade
+	grade := "C"
+	if score >= 80 {
+		grade = "A"
+	} else if score >= 50 {
+		grade = "B"
+	}
+
+	// Funding limit based on repeat buyer status
+	fundingLimit := 60.0
+	if isRepeatBuyer {
+		fundingLimit = 100.0
+	}
+
+	return &models.AdminGradeSuggestionResponse{
+		InvoiceID:         invoiceID.String(),
+		SuggestedGrade:    grade,
+		GradeScore:        score,
+		CountryRisk:       countryRisk,
+		CountryScore:      countryScore,
+		HistoryScore:      historyScore,
+		DocumentScore:     documentScore,
+		IsRepeatBuyer:     isRepeatBuyer,
+		DocumentsComplete: documentsComplete,
+		FundingLimit:      fundingLimit,
+	}, nil
+}
+
+// GetInvoiceReviewData gets all data needed for admin review (Flow 5 - Split Screen)
+func (s *InvoiceService) GetInvoiceReviewData(invoiceID uuid.UUID) (*models.InvoiceReviewData, error) {
+	invoice, err := s.invoiceRepo.FindByID(invoiceID)
+	if err != nil {
+		return nil, err
+	}
+	if invoice == nil {
+		return nil, errors.New("invoice not found")
+	}
+
+	// Get buyer
+	buyer, _ := s.buyerRepo.FindByID(invoice.BuyerID)
+
+	// Get exporter profile
+	var exporterProfile *models.UserProfile
+	if s.userRepo != nil {
+		exporterProfile, _ = s.userRepo.FindProfileByUserID(invoice.ExporterID)
+	}
+
+	// Get documents with validation status
+	docs, _ := s.invoiceRepo.FindDocumentsByInvoiceID(invoiceID)
+	var docStatuses []models.DocumentValidationStatus
+	for _, doc := range docs {
+		docStatuses = append(docStatuses, models.DocumentValidationStatus{
+			DocumentID:    doc.ID.String(),
+			DocumentType:  string(doc.DocumentType),
+			FileName:      doc.FileName,
+			FileURL:       doc.FileURL,
+			IsValid:       false, // Default, can be updated by admin
+			NeedsRevision: false,
+		})
+	}
+
+	// Get grade suggestion
+	gradeSuggestion, _ := s.GetGradeSuggestion(invoiceID)
+	if gradeSuggestion == nil {
+		gradeSuggestion = &models.AdminGradeSuggestionResponse{
+			SuggestedGrade: "C",
+			GradeScore:     0,
+		}
+	}
+
+	return &models.InvoiceReviewData{
+		Invoice:         *invoice,
+		Buyer:           buyer,
+		Exporter:        exporterProfile,
+		Documents:       docStatuses,
+		GradeSuggestion: *gradeSuggestion,
+	}, nil
+}
+
+// ApproveWithGrade approves an invoice with the confirmed grade (Flow 5)
+func (s *InvoiceService) ApproveWithGrade(invoiceID uuid.UUID, req *models.AdminApproveInvoiceRequest) error {
+	invoice, err := s.invoiceRepo.FindByID(invoiceID)
+	if err != nil {
+		return err
+	}
+	if invoice == nil {
+		return errors.New("invoice not found")
+	}
+	if invoice.Status != models.StatusPendingReview {
+		return errors.New("invoice is not pending review")
+	}
+
+	// Update grade
+	gradeScore := 0
+	switch req.Grade {
+	case "A":
+		gradeScore = 90
+	case "B":
+		gradeScore = 65
+	case "C":
+		gradeScore = 35
+	}
+
+	// Update interest rates if provided
+	priorityRate := 10.0
+	catalystRate := 15.0
+	if invoice.PriorityInterestRate != nil {
+		priorityRate = *invoice.PriorityInterestRate
+	}
+	if invoice.CatalystInterestRate != nil {
+		catalystRate = *invoice.CatalystInterestRate
+	}
+	if req.PriorityInterestRate > 0 {
+		priorityRate = req.PriorityInterestRate
+	}
+	if req.CatalystInterestRate > 0 {
+		catalystRate = req.CatalystInterestRate
+	}
+
+	// Calculate advance amount
+	advanceAmount := invoice.Amount * (invoice.AdvancePercentage / 100)
+	if invoice.AdvanceAmount != nil {
+		advanceAmount = *invoice.AdvanceAmount
+	}
+
+	// Update invoice with grade and rates
+	invoice.Grade = &req.Grade
+	invoice.GradeScore = &gradeScore
+	invoice.PriorityInterestRate = &priorityRate
+	invoice.CatalystInterestRate = &catalystRate
+	invoice.AdvanceAmount = &advanceAmount
+	invoice.Status = models.StatusApproved
+
+	return s.invoiceRepo.Update(invoice)
+}
+
+// GetPendingInvoices gets all invoices pending admin review
+func (s *InvoiceService) GetPendingInvoices(page, perPage int) (*models.InvoiceListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 10
+	}
+
+	status := models.StatusPendingReview
+	filter := &models.InvoiceFilter{
+		Status:  &status,
+		Page:    page,
+		PerPage: perPage,
+	}
+
+	invoices, total, err := s.invoiceRepo.FindAll(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	return &models.InvoiceListResponse{
+		Invoices:   invoices,
+		Total:      total,
+		Page:       page,
+		PerPage:    perPage,
+		TotalPages: models.CalculateTotalPages(total, perPage),
+	}, nil
+}
+
+// getCountryRiskTier returns the risk tier for a country (uses grading_service.CountryRiskTier)
+func getCountryRiskTier(country string) int {
+	if tier, ok := CountryRiskTier[country]; ok {
+		return tier
+	}
+	return 3 // Default to high risk
 }

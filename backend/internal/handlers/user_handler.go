@@ -72,41 +72,6 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	utils.SuccessResponse(c, user)
 }
 
-// UpdateWallet godoc
-// @Summary Update wallet address
-// @Description Link a wallet address to the user account
-// @Tags User
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Param request body models.UpdateWalletRequest true "Wallet address"
-// @Success 200 {object} models.User
-// @Router /user/wallet [put]
-func (h *UserHandler) UpdateWallet(c *gin.Context) {
-	userID := c.MustGet("user_id").(uuid.UUID)
-
-	var req models.UpdateWalletRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.BadRequestError(c, err.Error())
-		return
-	}
-
-	// Check if wallet already exists
-	exists, _ := h.userRepo.WalletExists(req.WalletAddress)
-	if exists {
-		utils.ConflictError(c, "Wallet address already linked to another account")
-		return
-	}
-
-	if err := h.userRepo.UpdateWallet(userID, req.WalletAddress); err != nil {
-		utils.InternalServerError(c, "Failed to update wallet")
-		return
-	}
-
-	user, _ := h.userRepo.FindByID(userID)
-	utils.SuccessResponse(c, user)
-}
-
 // SubmitKYC godoc
 // @Summary Submit KYC verification
 // @Description Submit KYC/KYB verification request
@@ -276,4 +241,220 @@ func (h *UserHandler) RejectKYC(c *gin.Context) {
 
 	kyc, _ := h.kycRepo.FindByID(kycID)
 	utils.SuccessResponse(c, kyc)
+}
+
+// ==================== Profile Management (Flow 2) ====================
+
+// GetPersonalData godoc
+// @Summary Get personal data (read-only from KTP)
+// @Description Get user's personal data from KYC - read only
+// @Tags User Profile
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} models.ProfileDataResponse
+// @Router /user/profile/data [get]
+func (h *UserHandler) GetPersonalData(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	user, err := h.userRepo.FindByID(userID)
+	if err != nil || user == nil {
+		utils.NotFoundError(c, "User not found")
+		return
+	}
+
+	identity, _ := h.userRepo.FindIdentityByUserID(userID)
+
+	response := models.ProfileDataResponse{
+		Email:        user.Email,
+		MemberStatus: string(user.MemberStatus),
+		Role:         string(user.Role),
+		IsVerified:   user.IsVerified,
+		JoinedAt:     user.CreatedAt.Format("02 January 2006"),
+	}
+
+	if user.Username != nil {
+		response.Username = *user.Username
+	}
+
+	if identity != nil {
+		response.FullName = identity.FullName
+		response.NIKMasked = identity.MaskNIK()
+	} else if user.Profile != nil {
+		response.FullName = user.Profile.FullName
+		response.NIKMasked = "****"
+	}
+
+	utils.SuccessResponse(c, response)
+}
+
+// GetBankAccount godoc
+// @Summary Get bank account info
+// @Description Get user's primary bank account for disbursement
+// @Tags User Profile
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} models.BankAccountResponse
+// @Router /user/profile/bank-account [get]
+func (h *UserHandler) GetBankAccount(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	account, err := h.userRepo.FindPrimaryBankAccount(userID)
+	if err != nil {
+		utils.InternalServerError(c, "Failed to get bank account")
+		return
+	}
+	if account == nil {
+		utils.NotFoundError(c, "No bank account found")
+		return
+	}
+
+	response := models.BankAccountResponse{
+		BankCode:      account.BankCode,
+		BankName:      account.BankName,
+		AccountNumber: models.MaskAccountNumber(account.AccountNumber),
+		AccountName:   account.AccountName,
+		IsPrimary:     account.IsPrimary,
+		IsVerified:    account.IsVerified,
+		Microcopy:     models.BankAccountMicrocopy,
+	}
+
+	utils.SuccessResponse(c, response)
+}
+
+// ChangeBankAccount godoc
+// @Summary Change bank account (requires OTP)
+// @Description Change user's primary bank account - requires OTP verification for security
+// @Tags User Profile
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body models.ChangeBankAccountRequest true "New bank account"
+// @Success 200 {object} models.BankAccountResponse
+// @Router /user/profile/bank-account [put]
+func (h *UserHandler) ChangeBankAccount(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req models.ChangeBankAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestError(c, err.Error())
+		return
+	}
+
+	// Verify OTP token (abstracted for MVP - always pass)
+	// In production: validate OTP via OTPService
+	if req.OTPToken == "" {
+		utils.BadRequestError(c, "OTP verification required for security")
+		return
+	}
+
+	// Validate bank code
+	var bankName string
+	for _, bank := range models.GetSupportedBanks() {
+		if bank.Code == req.BankCode {
+			bankName = bank.Name
+			break
+		}
+	}
+	if bankName == "" {
+		utils.BadRequestError(c, "Bank tidak didukung")
+		return
+	}
+
+	// Create new bank account as primary
+	newAccount := &models.BankAccount{
+		UserID:        userID,
+		BankCode:      req.BankCode,
+		BankName:      bankName,
+		AccountNumber: req.AccountNumber,
+		AccountName:   req.AccountName,
+		IsVerified:    true, // Auto-verified for MVP
+		IsPrimary:     true,
+	}
+
+	// Unset previous primary and create new
+	if err := h.userRepo.CreateBankAccount(newAccount); err != nil {
+		utils.InternalServerError(c, "Failed to update bank account")
+		return
+	}
+
+	// Set as primary (this also unsets previous primary)
+	if err := h.userRepo.SetPrimaryBankAccount(userID, newAccount.ID); err != nil {
+		utils.InternalServerError(c, "Failed to set primary bank account")
+		return
+	}
+
+	response := models.BankAccountResponse{
+		BankCode:      newAccount.BankCode,
+		BankName:      newAccount.BankName,
+		AccountNumber: models.MaskAccountNumber(newAccount.AccountNumber),
+		AccountName:   newAccount.AccountName,
+		IsPrimary:     true,
+		IsVerified:    true,
+		Microcopy:     "Rekening berhasil diubah. Rekening ini akan digunakan untuk pencairan dana.",
+	}
+
+	utils.SuccessResponse(c, response)
+}
+
+// ChangePassword godoc
+// @Summary Change password
+// @Description Change user's password - requires current password verification
+// @Tags User Profile
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body models.ChangePasswordRequest true "Password change request"
+// @Success 200 {object} map[string]string
+// @Router /user/profile/password [put]
+func (h *UserHandler) ChangePassword(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req models.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestError(c, err.Error())
+		return
+	}
+
+	// Get current user
+	user, err := h.userRepo.FindByID(userID)
+	if err != nil || user == nil {
+		utils.NotFoundError(c, "User not found")
+		return
+	}
+
+	// Verify current password
+	if !utils.CheckPassword(req.CurrentPassword, user.PasswordHash) {
+		utils.BadRequestError(c, "Password saat ini salah")
+		return
+	}
+
+	// Hash new password
+	hashedPassword, err := utils.HashPassword(req.NewPassword)
+	if err != nil {
+		utils.InternalServerError(c, "Failed to process password")
+		return
+	}
+
+	// Update password
+	if err := h.userRepo.UpdatePassword(userID, hashedPassword); err != nil {
+		utils.InternalServerError(c, "Failed to update password")
+		return
+	}
+
+	utils.SuccessResponse(c, gin.H{
+		"message": "Password berhasil diubah",
+	})
+}
+
+// GetSupportedBanks godoc
+// @Summary Get list of supported banks
+// @Description Get list of banks supported for disbursement
+// @Tags User Profile
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {array} models.SupportedBank
+// @Router /user/profile/banks [get]
+func (h *UserHandler) GetSupportedBanks(c *gin.Context) {
+	banks := models.GetSupportedBanks()
+	utils.SuccessResponse(c, banks)
 }

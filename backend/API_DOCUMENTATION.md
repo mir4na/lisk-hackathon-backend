@@ -4,9 +4,47 @@ Base URL: `http://localhost:8080`
 
 ## Important Notes
 
-> ⚠️ **Wallet Requirement**: Users (both eksportir and investor) MUST connect their wallet before creating invoices or investing. Use `PUT /api/v1/user/wallet` to connect wallet.
+> 🏦 **Bank Account Required**: Users register their bank account at registration for fund disbursement. No crypto wallet needed - all transactions are in IDR through escrow.
 
-> 💰 **Account Balance**: Each user has an account balance (balance_idr) visible via `GET /api/v1/user/balance` or in profile response.
+> 💰 **Account Balance** (Saldo):
+> - **Investor**: Total dana yang sedang dipinjamkan ke mitra-mitra (outstanding investments)
+> - **Mitra**: Total saldo hutang yang dimiliki ke investor-investor (outstanding debt)
+>
+> This is NOT a virtual wallet. Funds flow through bank transfers via escrow.
+
+> 🔄 **Fund Flow**:
+> - **Investor → Mitra**: Investor transfers to escrow → escrow disburses to mitra's bank account
+> - **Mitra → Investor**: Mitra pays to VA (escrow) → escrow distributes to investors' bank accounts
+
+> 🔑 **Role-Based Access Control (RBAC)**: Users select their role at registration:
+> - **Investor (Pendana)**: Can invest in invoice pools
+> - **Mitra (Eksportir)**: Can submit invoices for funding
+> - **Guest (Tamu)**: Unregistered users who can only view marketplace
+
+> 💵 **Currency**: All transactions use **IDR (Indonesian Rupiah)** for MVP phase.
+
+> 📊 **Interest Calculation**: Flat rate formula: `Principal + (Principal × Rate/100)`
+> - No time-based (pro-rata) calculation for MVP
+> - Example: Rp 10,000,000 at 12% = Rp 10,000,000 + Rp 1,200,000 = Rp 11,200,000
+
+---
+
+## Role Permissions Matrix
+
+| Feature | Guest | Investor | Mitra | Admin |
+|---------|-------|----------|-------|-------|
+| View Marketplace | ✅ | ✅ | ✅ | ✅ |
+| View Pool Details | ✅ | ✅ | ✅ | ✅ |
+| Invest in Pools | ❌ | ✅ | ❌ | ✅ |
+| Complete Risk Questionnaire | ❌ | ✅ | ❌ | ❌ |
+| Submit Invoices | ❌ | ❌ | ✅* | ✅ |
+| View Mitra Dashboard | ❌ | ❌ | ✅ | ✅ |
+| Manage Bank Account | ❌ | ✅ | ✅ | ✅ |
+| Admin Panel Access | ❌ | ❌ | ❌ | ✅ |
+
+*Mitra must be verified first
+
+---
 
 ## Health Check
 
@@ -77,6 +115,20 @@ curl -X POST http://localhost:8080/api/v1/auth/verify-otp \
 
 ### 3. Register User
 
+Users choose their role at registration. Roles are mutually exclusive. **Guest role is not available** - unregistered users viewing the app are guests.
+
+**Available Roles:**
+- `investor` - Can invest in invoice pools
+- `mitra` - Can submit invoices for funding (requires verification)
+
+**KYC Verification at Registration:**
+Registration now requires identity verification:
+- KTP Photo upload
+- Selfie with KTP
+- NIK (16 digits)
+- Full Name (must match KTP and bank account)
+- Bank Account (for disbursement)
+
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/register \
   -H "Content-Type: application/json" \
@@ -86,11 +138,68 @@ curl -X POST http://localhost:8080/api/v1/auth/register \
     "password": "password123",
     "confirm_password": "password123",
     "role": "investor",
-    "full_name": "John Doe",
-    "phone_number": "081234567890",
     "cooperative_agreement": true,
-    "otp_token": "<token_from_verify_otp>"
+    "otp_token": "<token_from_verify_otp>",
+    
+    "nik": "3201011234567890",
+    "full_name": "John Doe",
+    "ktp_photo_url": "https://storage.example.com/ktp/xxx.jpg",
+    "selfie_url": "https://storage.example.com/selfie/xxx.jpg",
+    
+    "bank_code": "bca",
+    "account_number": "1234567890",
+    "account_name": "John Doe"
   }'
+```
+
+**Request Fields:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| email | string | Yes | User email (verified via OTP) |
+| username | string | Yes | Unique username |
+| password | string | Yes | Min 8 characters |
+| confirm_password | string | Yes | Must match password |
+| role | string | Yes | One of: `investor`, `mitra` |
+| cooperative_agreement | bool | Yes | Must be `true` |
+| otp_token | string | Yes | Token from verify-otp step |
+| nik | string | Yes | 16-digit NIK |
+| full_name | string | Yes | Full name (must match KTP) |
+| ktp_photo_url | string | Yes | URL of uploaded KTP photo |
+| selfie_url | string | Yes | URL of selfie with KTP |
+| bank_code | string | Yes | Bank code (bca, mandiri, bni, etc.) |
+| account_number | string | Yes | Bank account number |
+| account_name | string | Yes | Account holder name (validated against full_name) |
+
+> 💡 **Microcopy**: "Rekening ini akan menjadi satu-satunya tujuan pencairan dana demi keamanan. Kamu bisa mengubahnya nanti di bagian profile."
+
+**Supported Banks:**
+- `bca` - Bank Central Asia (BCA)
+- `mandiri` - Bank Mandiri
+- `bni` - Bank Negara Indonesia (BNI)
+- `bri` - Bank Rakyat Indonesia (BRI)
+- `cimb` - CIMB Niaga
+- `danamon` - Bank Danamon
+- `permata` - Bank Permata
+- `bsi` - Bank Syariah Indonesia (BSI)
+- `btn` - Bank Tabungan Negara (BTN)
+- `ocbc` - OCBC NISP
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "uuid",
+      "email": "user@example.com",
+      "username": "testuser",
+      "role": "investor",
+      "is_verified": true
+    },
+    "access_token": "eyJhbGc...",
+    "refresh_token": "eyJhbGc..."
+  }
+}
 ```
 
 ### 4. Login
@@ -138,37 +247,138 @@ curl -X PUT http://localhost:8080/api/v1/user/profile \
   }'
 ```
 
-### Update Wallet
+---
+
+## Profile Management (Flow: MANAGEMENT PROFIL USER)
+
+### 1. Data Diri (Read-Only)
+
+Get personal data from KYC - read only section.
 
 ```bash
-curl -X PUT http://localhost:8080/api/v1/user/wallet \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "wallet_address": "0x1234567890123456789012345678901234567890"
-  }'
-```
-
-### Get Balance
-
-```bash
-curl -X GET http://localhost:8080/api/v1/user/balance \
+curl -X GET http://localhost:8080/api/v1/user/profile/data \
   -H "Authorization: Bearer <access_token>"
 ```
 
 Response:
 ```json
 {
-  "balance": 5000000,
-  "currency": "IDR"
+  "full_name": "John Doe",
+  "nik_masked": "320101******7890",
+  "email": "user@example.com",
+  "username": "johndoe",
+  "member_status": "calon_anggota_pendana",
+  "role": "investor",
+  "is_verified": true,
+  "joined_at": "15 January 2024"
 }
+```
+
+### 2. Rekening Bank
+
+#### Get Current Bank Account
+
+```bash
+curl -X GET http://localhost:8080/api/v1/user/profile/bank-account \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Response:
+```json
+{
+  "bank_code": "bca",
+  "bank_name": "Bank Central Asia (BCA)",
+  "account_number": "****7890",
+  "account_name": "John Doe",
+  "is_primary": true,
+  "is_verified": true,
+  "microcopy": "Rekening ini akan menjadi satu-satunya tujuan pencairan dana demi keamanan."
+}
+```
+
+#### Change Bank Account (Requires OTP)
+
+> ⚠️ **Security**: Changing bank account requires OTP verification for security.
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/user/profile/bank-account \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "otp_token": "<otp_verification_token>",
+    "bank_code": "mandiri",
+    "account_number": "0987654321",
+    "account_name": "John Doe"
+  }'
+```
+
+#### Get Supported Banks
+
+```bash
+curl -X GET http://localhost:8080/api/v1/user/profile/banks \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 3. Keamanan (Change Password)
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/user/profile/password \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "current_password": "oldpassword123",
+    "new_password": "newpassword456",
+    "confirm_password": "newpassword456"
+  }'
+```
+
+### 4. Log Out
+
+Logout is handled client-side by removing stored tokens.
+
+### Get Saldo/Balance
+
+Get user's outstanding balance:
+- **Investor**: Total dana yang sedang dipinjamkan ke mitra (outstanding investments)
+- **Mitra**: Total hutang yang dimiliki ke investor-investor (outstanding debt)
+
+> ⚠️ This is NOT a virtual wallet. It tracks active investments/debts only.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/user/balance \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Response for Investor:
+```json
+{
+  "balance": 5000000,
+  "currency": "IDR",
+  "description": "Total dana yang sedang dipinjamkan"
+}
+```
+
+Response for Mitra:
+```json
+{
+  "balance": 5000000,
+  "currency": "IDR",
+  "description": "Total saldo hutang ke investor"
+}
+```
 ```
 
 ---
 
-## Payment Gateway (PROTOTYPE)
+## Fund Transfer via Escrow (MVP PROTOTYPE)
 
-### Deposit Saldo
+> 💡 **Note**: In MVP, fund transfers are simulated. In production:
+> - **Investor deposits**: Transfer to escrow bank account
+> - **Investor withdrawals**: Escrow transfers to investor's registered bank account
+> - **Mitra receives funding**: Escrow transfers to mitra's registered bank account
+> - **Mitra repays**: Mitra pays to VA, escrow distributes to investors' bank accounts
+
+### Simulate Deposit (Admin/Testing)
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/payments/deposit \
@@ -179,7 +389,7 @@ curl -X POST http://localhost:8080/api/v1/payments/deposit \
   }'
 ```
 
-### Withdraw Saldo
+### Simulate Withdraw (Admin/Testing)
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/payments/withdraw \
@@ -190,7 +400,7 @@ curl -X POST http://localhost:8080/api/v1/payments/withdraw \
   }'
 ```
 
-### Check Balance
+### Check Balance (Same as /user/balance)
 
 ```bash
 curl -X GET http://localhost:8080/api/v1/payments/balance \
@@ -200,6 +410,8 @@ curl -X GET http://localhost:8080/api/v1/payments/balance \
 ---
 
 ## MITRA Application (Flow 2)
+
+> 📋 **Note**: Users who registered with `role: "mitra"` must complete MITRA verification before submitting invoices.
 
 ### Apply as MITRA
 
@@ -321,6 +533,8 @@ curl -X POST http://localhost:8080/api/v1/invoices/<invoice_id>/submit \
 ---
 
 ## Marketplace - Funding Pools (Flow 6)
+
+> 👀 **Guest Access**: Guest users can view marketplace and pool details but cannot invest.
 
 ### List Open Pools
 
@@ -474,19 +688,13 @@ curl -X POST http://localhost:8080/api/v1/risk-questionnaire \
   }'
 ```
 
-Response (if eligible for Catalyst):
-```json
-{
-  "catalyst_unlocked": true,
-  "message": "Selamat! Anda sekarang dapat berinvestasi di Junior Tranche (Catalyst)."
-}
-```
+> 💡 **Note**: Risk questionnaire is now **informational only**. Catalyst eligibility is determined by inline consent at each investment, not by pre-completing this questionnaire.
 
-Response (if not eligible):
+Response:
 ```json
 {
-  "catalyst_unlocked": false,
-  "message": "Berdasarkan jawaban Anda, Anda hanya dapat berinvestasi di Senior Tranche (Priority)."
+  "completed": true,
+  "message": "Questionnaire saved. You can invest in any tranche by accepting the required consents at investment time."
 }
 ```
 
@@ -497,33 +705,41 @@ curl -X GET http://localhost:8080/api/v1/risk-questionnaire/status \
   -H "Authorization: Bearer <access_token>"
 ```
 
-Response:
-```json
-{
-  "completed": true,
-  "catalyst_unlocked": true,
-  "completed_at": "2024-01-15T10:30:00Z"
-}
-```
-
-#### Catalyst Unlock Logic
-
-To unlock Catalyst tranche, investor must answer:
-1. **Investment Purpose**: "Spekulasi" (value: 3)
-2. **Loss Tolerance**: "Ya, saya siap" (value: 2)
-3. **Tranche Understanding**: "Ya, saya mengerti" (value: 2)
-
 ---
 
 ## Investments (Flow 6)
 
-### Invest in Pool (with Tranche Selection)
-
-> ⚠️ **Wallet Required**: Investor must have a connected wallet address.
+> 📊 **Interest Calculation**: Flat rate - `Expected Return = Principal + (Principal × Rate/100)`
 >
-> ⚠️ **Catalyst Tranche**: Requires completing risk questionnaire with correct answers. If not unlocked, you will receive error: "Catalyst tranche not unlocked. Please complete risk questionnaire first."
+> Example: Rp 5,000,000 at 10% = Rp 5,000,000 + Rp 500,000 = Rp 5,500,000
+>
+> 🏦 **Bank Account Required**: Investor must have a verified bank account for receiving returns.
 
-**Priority Tranche (Lower Risk, Lower Return):**
+### Investment UI Flow
+
+**1. Header Info**: Detail Buyer, Dokumen Legal (Download/Preview), & Skema Asuransi
+
+**2. Tab Selector**:
+- Tab Kiri (Default): [ 🛡️ Pendanaan Prioritas ]
+- Tab Kanan: [ ⚡ Pendanaan Katalis ]
+
+**3. Info Box** (berubah sesuai Tab):
+- **Prioritas**: "Dana Anda berada di antrean pertama. Saat Importir membayar, Anda akan menerima pengembalian modal & hasil paling awal. Risikonya lebih rendah karena dilindungi oleh dana Katalis." (Warna: Biru/Hijau)
+- **Katalis**: "Dana Anda berfungsi sebagai penopang risiko. Anda akan dibayar setelah Pendana Prioritas lunas sepenuhnya. Sebagai ganti risiko ini, Anda mendapatkan imbal hasil lebih tinggi." (Warna: Oranye/Ungu)
+
+**4. Calculator Input**:
+- Field: "Nominal Pendanaan (Rp)"
+- Text: "Estimasi Imbal Hasil (..% p.a)" - auto-update sesuai Tab
+- Text: "Estimasi Total Diterima" - Rumus: Modal + (Modal × Rate)
+- Button: "Danai Sekarang"
+
+### Invest in Pool (with Inline Consent)
+
+**Priority Tranche Flow:**
+1. Muncul Bottom Sheet ringkasan
+2. Checkbox: "Saya menyetujui Syarat & Ketentuan"
+3. Input PIN/Biometric
+4. Submit
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/investments \
@@ -532,11 +748,21 @@ curl -X POST http://localhost:8080/api/v1/investments \
   -d '{
     "pool_id": "<pool_uuid>",
     "amount": 5000000,
-    "tranche": "priority"
+    "tranche": "priority",
+    "tnc_accepted": true
   }'
 ```
 
-**Catalyst Tranche (Higher Risk, Higher Return):**
+**Catalyst Tranche Flow:**
+1. Muncul Full Screen Warning Modal (Warna Merah/Oranye)
+2. Wajib Scroll sampai bawah
+3. Wajib Centang 3 Poin:
+   - [ ] "Saya sadar dana ini menjadi jaminan pertama jika gagal bayar."
+   - [ ] "Saya siap menanggung risiko kehilangan modal."
+   - [ ] "Saya paham ini bukan produk bank."
+4. Tombol "Lanjut Danai" baru menyala
+5. Input PIN/Biometric
+6. Submit
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/investments \
@@ -545,11 +771,26 @@ curl -X POST http://localhost:8080/api/v1/investments \
   -d '{
     "pool_id": "<pool_uuid>",
     "amount": 1000000,
-    "tranche": "catalyst"
-  }'
+    "tranche": "catalyst",
+    "tnc_accepted": true,
+    "catalyst_consents": {
+      "first_loss_consent": true,
+      "risk_loss_consent": true,
+      "not_bank_consent": true
+    }'
 ```
 
-Note: Catalyst tranche requires completing risk questionnaire first (see Risk Questionnaire section).
+**Request Fields:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| pool_id | uuid | Yes | Target funding pool ID |
+| amount | number | Yes | Investment amount (Rp) |
+| tranche | string | Yes | `priority` or `catalyst` |
+| tnc_accepted | bool | Yes | Terms & Conditions accepted |
+| catalyst_consents | object | Catalyst only | Required for catalyst tranche |
+| catalyst_consents.first_loss_consent | bool | Catalyst only | "Saya sadar dana ini menjadi jaminan pertama jika gagal bayar" |
+| catalyst_consents.risk_loss_consent | bool | Catalyst only | "Saya siap menanggung risiko kehilangan modal" |
+| catalyst_consents.not_bank_consent | bool | Catalyst only | "Saya paham ini bukan produk bank" |
 
 ### List My Investments
 
@@ -587,6 +828,173 @@ Response:
 ```bash
 curl -X GET http://localhost:8080/api/v1/mitra/dashboard \
   -H "Authorization: Bearer <access_token>"
+```
+
+---
+
+## Mitra Repayment (Flow: MITRA MEMBAYAR HUTANG)
+
+### UI Flow Overview
+
+1. **Active Invoice Card**: Shows "Bayar Pelunasan" primary button
+2. **Modal Pop-up**: Displays repayment breakdown (Principal + Interest by tranche)
+3. **Payment Method Selection**: Choose VA bank (BCA/Mandiri/BNI)
+4. **VA Payment Page**:
+   - VA Number (copy button)
+   - Total Amount (closed amount, cannot change)
+   - Timer: "Selesaikan dalam 24:00:00"
+5. **Auto-refresh**: Status becomes "LUNAS" when backend detects payment
+
+### Get Active Invoices for Repayment
+
+```bash
+curl -X GET http://localhost:8080/api/v1/mitra/invoices/active \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Response:
+```json
+{
+  "invoices": [
+    {
+      "invoice_id": "uuid",
+      "pool_id": "uuid",
+      "invoice_number": "INV-2024-001",
+      "buyer_name": "German Import GmbH",
+      "amount": 50000000,
+      "total_due": 55500000,
+      "due_date": "2024-03-01T00:00:00Z",
+      "status": "funded",
+      "days_until_due": 30,
+      "can_pay": true
+    }
+  ]
+}
+```
+
+### Get Repayment Breakdown
+
+Shows detailed breakdown by tranche (Priority + Catalyst).
+
+```bash
+curl -X GET http://localhost:8080/api/v1/mitra/pools/<pool_id>/breakdown \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Response:
+```json
+{
+  "pool_id": "uuid",
+  "invoice_id": "uuid",
+  "invoice_number": "INV-2024-001",
+  "buyer_name": "German Import GmbH",
+  "due_date": "2024-03-01T00:00:00Z",
+  
+  "priority_principal": 40000000,
+  "catalyst_principal": 10000000,
+  "total_principal": 50000000,
+  
+  "priority_interest_rate": 10,
+  "catalyst_interest_rate": 15,
+  "priority_interest": 4000000,
+  "catalyst_interest": 1500000,
+  "total_interest": 5500000,
+  
+  "priority_total": 44000000,
+  "catalyst_total": 11500000,
+  "grand_total": 55500000,
+  
+  "currency": "IDR"
+}
+```
+
+### Get Available VA Payment Methods
+
+```bash
+curl -X GET http://localhost:8080/api/v1/mitra/payment-methods \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Response:
+```json
+[
+  {"bank_code": "bca", "bank_name": "Bank Central Asia (BCA)"},
+  {"bank_code": "mandiri", "bank_name": "Bank Mandiri"},
+  {"bank_code": "bni", "bank_name": "Bank Negara Indonesia (BNI)"}
+]
+```
+
+### Create VA for Payment
+
+```bash
+curl -X POST http://localhost:8080/api/v1/mitra/repayment/va \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pool_id": "<pool_uuid>",
+    "bank_code": "bca"
+  }'
+```
+
+Response:
+```json
+{
+  "virtual_account": {
+    "id": "uuid",
+    "va_number": "8bca123456789",
+    "bank_code": "bca",
+    "bank_name": "Bank Central Asia (BCA)",
+    "amount": 55500000,
+    "status": "pending",
+    "expires_at": "2024-01-16T10:00:00Z"
+  },
+  "breakdown": { ... },
+  "remaining_time": "23:59:59",
+  "remaining_hours": 24,
+  "microcopy": "Selesaikan pembayaran dalam waktu 24 jam. VA akan otomatis kadaluarsa setelah batas waktu."
+}
+```
+
+### Get VA Payment Page Details
+
+```bash
+curl -X GET http://localhost:8080/api/v1/mitra/repayment/va/<va_id> \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Response:
+```json
+{
+  "va_number": "88001234567890",
+  "bank_code": "bca",
+  "bank_name": "Bank Central Asia (BCA)",
+  "amount": 55500000,
+  "amount_formatted": "Rp 55.500.000",
+  "status": "pending",
+  "expires_at": "2024-01-16T10:00:00Z",
+  "remaining_time": "23:45:30",
+  "breakdown": { ... },
+  "microcopy": "Nominal pembayaran bersifat tetap dan tidak dapat diubah."
+}
+```
+
+### Simulate VA Payment (MVP/Testing)
+
+For testing purposes only - simulates receiving VA payment.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/mitra/repayment/va/<va_id>/simulate-pay \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Response:
+```json
+{
+  "status": "paid",
+  "message": "Pembayaran berhasil! Dana sedang didistribusikan ke investor.",
+  "va_id": "uuid",
+  "paid_at": "2024-01-15T12:00:00Z"
+}
 ```
 
 ---
@@ -829,16 +1237,60 @@ curl -X POST http://localhost:8080/api/v1/admin/balance/grant \
 
 ### Priority Tranche (Pendanaan Prioritas)
 - Lower risk, lower return
-- Interest rate: Typically 10-12% p.a.
+- Interest rate: Typically 10-12%
 - Paid FIRST during repayment
 - Default: 80% of total pool
 
 ### Catalyst Tranche (Pendanaan Katalis)
 - Higher risk, higher return
-- Interest rate: Typically 15-18% p.a.
+- Interest rate: Typically 15-18%
 - Paid AFTER Priority is fully paid
 - Default: 20% of total pool
 - First-loss capital in case of default
+
+### Interest Calculation (Flat Rate)
+
+For MVP, interest is calculated as a **flat rate** (no time factor):
+
+```
+Expected Return = Principal + (Principal × Rate / 100)
+```
+
+**Example - Priority Tranche (10% rate):**
+- Investment: Rp 5,000,000
+- Expected Return: Rp 5,000,000 + (Rp 5,000,000 × 10/100) = Rp 5,500,000
+- Profit: Rp 500,000
+
+**Example - Catalyst Tranche (15% rate):**
+- Investment: Rp 2,000,000
+- Expected Return: Rp 2,000,000 + (Rp 2,000,000 × 15/100) = Rp 2,300,000
+- Profit: Rp 300,000
+
+---
+
+## MVP Abstractions
+
+For the MVP phase, the following features are abstracted:
+
+### 1. Payment Gateway (Abstracted)
+- No real payment gateway integration
+- Balance system is simulated via admin grants
+- Deposits/withdrawals are prototype endpoints
+
+### 2. Currency
+- All transactions use **IDR** (Indonesian Rupiah)
+- No blockchain IDRX stablecoin integration for MVP
+- Currency conversion from USD/EUR to IDR is supported
+
+### 3. Escrow System
+- Escrow is simulated in the backend
+- No actual smart contract escrow for MVP
+- Fund flow is tracked in database
+
+### 4. Blockchain Integration
+- NFT tokenization is optional for MVP
+- Invoice records are stored in PostgreSQL
+- Smart contract interaction is abstracted
 
 ---
 

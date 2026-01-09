@@ -461,6 +461,58 @@ func RunMigrations(db *sql.DB) error {
 
 		// Add investor return tx_hash to investments for transparency
 		`ALTER TABLE investments ADD COLUMN IF NOT EXISTS return_tx_hash VARCHAR(66);`,
+
+		// User identities table (KYC data from registration)
+		`CREATE TABLE IF NOT EXISTS user_identities (
+			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+			nik VARCHAR(16) NOT NULL,
+			full_name VARCHAR(255) NOT NULL,
+			ktp_photo_url TEXT NOT NULL,
+			selfie_url TEXT NOT NULL,
+			is_verified BOOLEAN DEFAULT false,
+			verified_at TIMESTAMP,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_user_identities_user ON user_identities(user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_user_identities_nik ON user_identities(nik);`,
+
+		// Bank accounts table
+		`CREATE TABLE IF NOT EXISTS bank_accounts (
+			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+			bank_code VARCHAR(20) NOT NULL,
+			bank_name VARCHAR(100) NOT NULL,
+			account_number VARCHAR(50) NOT NULL,
+			account_name VARCHAR(255) NOT NULL,
+			is_verified BOOLEAN DEFAULT false,
+			is_primary BOOLEAN DEFAULT false,
+			verified_at TIMESTAMP,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_bank_accounts_user ON bank_accounts(user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_bank_accounts_primary ON bank_accounts(user_id, is_primary);`,
+
+		// Virtual Account payments for Mitra repayment (VA payment flow)
+		`CREATE TABLE IF NOT EXISTS virtual_accounts (
+			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			pool_id UUID REFERENCES funding_pools(id) ON DELETE CASCADE,
+			user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+			va_number VARCHAR(50) NOT NULL,
+			bank_code VARCHAR(20) NOT NULL,
+			bank_name VARCHAR(100) NOT NULL,
+			amount DECIMAL(20,2) NOT NULL,
+			status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'expired', 'cancelled')),
+			expires_at TIMESTAMP NOT NULL,
+			paid_at TIMESTAMP,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_virtual_accounts_pool ON virtual_accounts(pool_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_virtual_accounts_user ON virtual_accounts(user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_virtual_accounts_status ON virtual_accounts(status);`,
 	}
 
 	for i, migration := range migrations {

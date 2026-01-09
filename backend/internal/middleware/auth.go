@@ -68,6 +68,35 @@ func InvestorOnly() gin.HandlerFunc {
 	return RoleMiddleware("investor", "admin")
 }
 
+func MitraOnly() gin.HandlerFunc {
+	return RoleMiddleware("mitra", "admin")
+}
+
+func GuestOnly() gin.HandlerFunc {
+	// Guest can only view marketplace and pool details
+	return RoleMiddleware("guest", "investor", "mitra", "admin")
+}
+
+func GuestRestricted() gin.HandlerFunc {
+	// Restrict guests from performing transactions
+	return func(c *gin.Context) {
+		role, exists := c.Get("user_role")
+		if !exists {
+			utils.UnauthorizedError(c, "User role not found")
+			c.Abort()
+			return
+		}
+
+		if role.(string) == "guest" {
+			utils.ForbiddenError(c, "Guest accounts cannot perform transactions. Please upgrade your account.")
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
 func AdminOnly() gin.HandlerFunc {
 	return RoleMiddleware("admin")
 }
