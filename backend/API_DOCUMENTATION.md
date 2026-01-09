@@ -149,6 +149,21 @@ curl -X PUT http://localhost:8080/api/v1/user/wallet \
   }'
 ```
 
+### Get Balance
+
+```bash
+curl -X GET http://localhost:8080/api/v1/user/balance \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Response:
+```json
+{
+  "balance": 5000000,
+  "currency": "IDR"
+}
+```
+
 ---
 
 ## Payment Gateway (PROTOTYPE)
@@ -730,7 +745,7 @@ Response:
     "principal_amount": 50000000,
     "total_interest": 5000000,
     "total_amount_due": 55000000,
-    "currency": "IDRX",
+    "currency": "IDR",
     "due_date": "2024-03-01T00:00:00Z",
     "investor_details": [
       {
@@ -793,6 +808,18 @@ curl -X POST http://localhost:8080/api/v1/admin/mitra/<application_id>/reject \
   -H "Content-Type: application/json" \
   -d '{
     "reason": "Dokumen tidak valid atau tidak lengkap"
+  }'
+```
+
+### Grant Balance to User (MVP)
+
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/balance/grant \
+  -H "Authorization: Bearer <admin_access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "<user_uuid>",
+    "amount": 10000000
   }'
 ```
 
