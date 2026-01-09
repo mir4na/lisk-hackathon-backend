@@ -3,6 +3,8 @@ package services
 import (
 	"errors"
 	"fmt"
+	"math/rand"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -252,4 +254,149 @@ func (s *MitraService) Reject(applicationID, adminID uuid.UUID, reason string) e
 	}
 
 	return nil
+}
+
+// ==================== Mitra Repayment (VA Payment) ====================
+
+// GetActiveInvoicesForRepayment gets all active invoices that need repayment
+func (s *MitraService) GetActiveInvoicesForRepayment(userID uuid.UUID) ([]models.MitraActiveInvoice, error) {
+	// This would query invoices where pool is filled/closed and needs repayment
+	// For MVP, we'll return data from the funding pools
+	// In production: s.invoiceRepo.FindActiveByExporter(userID)
+
+	// Placeholder - return empty for now, actual implementation depends on invoice repository
+	return []models.MitraActiveInvoice{}, nil
+}
+
+// GetRepaymentBreakdown calculates the breakdown of repayment by tranche
+func (s *MitraService) GetRepaymentBreakdown(userID, poolID uuid.UUID) (*models.MitraRepaymentBreakdown, error) {
+	// Get pool and verify ownership
+	// For MVP: abstracted to return sample breakdown
+
+	breakdown := &models.MitraRepaymentBreakdown{
+		PoolID:               poolID,
+		PriorityInterestRate: 10.0,
+		CatalystInterestRate: 15.0,
+		Currency:             "IDR",
+	}
+
+	// Calculate sample values (in production, get from actual investments)
+	// Priority: principal 40M, interest 4M (10%), total 44M
+	// Catalyst: principal 10M, interest 1.5M (15%), total 11.5M
+	breakdown.PriorityPrincipal = 40000000
+	breakdown.CatalystPrincipal = 10000000
+	breakdown.TotalPrincipal = breakdown.PriorityPrincipal + breakdown.CatalystPrincipal
+
+	// Flat interest: principal × rate / 100
+	breakdown.PriorityInterest = breakdown.PriorityPrincipal * breakdown.PriorityInterestRate / 100
+	breakdown.CatalystInterest = breakdown.CatalystPrincipal * breakdown.CatalystInterestRate / 100
+	breakdown.TotalInterest = breakdown.PriorityInterest + breakdown.CatalystInterest
+
+	breakdown.PriorityTotal = breakdown.PriorityPrincipal + breakdown.PriorityInterest
+	breakdown.CatalystTotal = breakdown.CatalystPrincipal + breakdown.CatalystInterest
+	breakdown.GrandTotal = breakdown.TotalPrincipal + breakdown.TotalInterest
+
+	return breakdown, nil
+}
+
+// CreateVAPayment creates a Virtual Account for mitra to pay
+func (s *MitraService) CreateVAPayment(userID uuid.UUID, req *models.CreateVARequest) (*models.VAPaymentResponse, error) {
+	// Validate bank code
+	var bankName string
+	for _, method := range models.GetVAPaymentMethods() {
+		if method.BankCode == req.BankCode {
+			bankName = method.BankName
+			break
+		}
+	}
+	if bankName == "" {
+		return nil, errors.New("metode pembayaran tidak didukung")
+	}
+
+	// Get repayment breakdown
+	breakdown, err := s.GetRepaymentBreakdown(userID, req.PoolID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate VA number (abstracted for MVP)
+	vaNumber := fmt.Sprintf("8%s%d", req.BankCode[:3], rand.Intn(9999999999))
+
+	// Create VA with 24-hour expiry
+	expiresAt := time.Now().Add(24 * time.Hour)
+	va := &models.VirtualAccount{
+		ID:        uuid.New(),
+		PoolID:    req.PoolID,
+		UserID:    userID,
+		VANumber:  vaNumber,
+		BankCode:  req.BankCode,
+		BankName:  bankName,
+		Amount:    breakdown.GrandTotal,
+		Status:    models.VAStatusPending,
+		ExpiresAt: expiresAt,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	// In production: store VA to database
+	// s.vaRepo.Create(va)
+
+	// Calculate remaining time
+	remainingDuration := time.Until(expiresAt)
+	hours := int(remainingDuration.Hours())
+	minutes := int(remainingDuration.Minutes()) % 60
+	seconds := int(remainingDuration.Seconds()) % 60
+	remainingTime := fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+
+	return &models.VAPaymentResponse{
+		VA:             *va,
+		Breakdown:      *breakdown,
+		RemainingTime:  remainingTime,
+		RemainingHours: hours,
+		Microcopy:      "Selesaikan pembayaran dalam waktu 24 jam. VA akan otomatis kadaluarsa setelah batas waktu.",
+	}, nil
+}
+
+// GetVAPaymentStatus gets VA payment details for payment page
+func (s *MitraService) GetVAPaymentStatus(userID, vaID uuid.UUID) (*models.VAPaymentPageResponse, error) {
+	// In production: fetch from database
+	// va, err := s.vaRepo.FindByID(vaID)
+
+	// For MVP: return sample data
+	expiresAt := time.Now().Add(23 * time.Hour)
+	remainingDuration := time.Until(expiresAt)
+	hours := int(remainingDuration.Hours())
+	minutes := int(remainingDuration.Minutes()) % 60
+	seconds := int(remainingDuration.Seconds()) % 60
+
+	breakdown, _ := s.GetRepaymentBreakdown(userID, uuid.New())
+
+	return &models.VAPaymentPageResponse{
+		VANumber:        "88001234567890",
+		BankCode:        "bca",
+		BankName:        "Bank Central Asia (BCA)",
+		Amount:          breakdown.GrandTotal,
+		AmountFormatted: fmt.Sprintf("Rp %.0f", breakdown.GrandTotal),
+		Status:          models.VAStatusPending,
+		ExpiresAt:       expiresAt,
+		RemainingTime:   fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds),
+		Breakdown:       *breakdown,
+		Microcopy:       "Nominal pembayaran bersifat tetap dan tidak dapat diubah.",
+	}, nil
+}
+
+// SimulateVAPayment simulates VA payment for MVP testing
+func (s *MitraService) SimulateVAPayment(userID, vaID uuid.UUID) (map[string]interface{}, error) {
+	// In production: this would be a webhook from payment gateway
+	// For MVP: directly trigger the disbursement flow
+
+	// Get VA details and update status to paid
+	// Then trigger ExporterDisbursementToInvestors
+
+	return map[string]interface{}{
+		"status":  "paid",
+		"message": "Pembayaran berhasil! Dana sedang didistribusikan ke investor.",
+		"va_id":   vaID,
+		"paid_at": time.Now(),
+	}, nil
 }

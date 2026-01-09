@@ -11,17 +11,23 @@ import (
 
 // PaymentService handles dummy payment gateway operations (prototype)
 type PaymentService struct {
-	userRepo repository.UserRepositoryInterface
-	txRepo   repository.TransactionRepositoryInterface
+	userRepo    repository.UserRepositoryInterface
+	txRepo      repository.TransactionRepositoryInterface
+	fundingRepo repository.FundingRepositoryInterface
+	invoiceRepo repository.InvoiceRepositoryInterface
 }
 
 func NewPaymentService(
 	userRepo repository.UserRepositoryInterface,
 	txRepo repository.TransactionRepositoryInterface,
+	fundingRepo repository.FundingRepositoryInterface,
+	invoiceRepo repository.InvoiceRepositoryInterface,
 ) *PaymentService {
 	return &PaymentService{
-		userRepo: userRepo,
-		txRepo:   txRepo,
+		userRepo:    userRepo,
+		txRepo:      txRepo,
+		fundingRepo: fundingRepo,
+		invoiceRepo: invoiceRepo,
 	}
 }
 
@@ -44,11 +50,24 @@ type PaymentResponse struct {
 	Timestamp     time.Time `json:"timestamp"`
 }
 
-// BalanceResponse represents user balance info
+// BalanceResponse represents user balance info with role-specific data (Flow 3)
 type BalanceResponse struct {
-	UserID     uuid.UUID `json:"user_id"`
-	BalanceIDR float64   `json:"balance_idr"`
-	Currency   string    `json:"currency"`
+	UserID       uuid.UUID `json:"user_id"`
+	Role         string    `json:"role"`
+	MemberStatus string    `json:"member_status"`
+	BalanceIDR   float64   `json:"balance_idr"`
+	Currency     string    `json:"currency"`
+
+	// For Investor: funds currently in active investments
+	ActiveFunding  float64 `json:"active_funding,omitempty"`
+	ExpectedReturn float64 `json:"expected_return,omitempty"`
+
+	// For Mitra: amount owed to investors
+	TotalOwed     float64 `json:"total_owed,omitempty"`
+	TotalInterest float64 `json:"total_interest,omitempty"`
+
+	// Description based on role
+	Description string `json:"description"`
 }
 
 // SimulateDeposit simulates depositing funds to user balance (PROTOTYPE)
@@ -139,7 +158,7 @@ func (s *PaymentService) SimulateWithdraw(userID uuid.UUID, amount float64) (*Pa
 	}, nil
 }
 
-// GetBalance returns user's current balance
+// GetBalance returns user's current balance with role-specific info (Flow 3)
 func (s *PaymentService) GetBalance(userID uuid.UUID) (*BalanceResponse, error) {
 	user, err := s.userRepo.FindByID(userID)
 	if err != nil {
@@ -149,11 +168,52 @@ func (s *PaymentService) GetBalance(userID uuid.UUID) (*BalanceResponse, error) 
 		return nil, errors.New("user not found")
 	}
 
-	return &BalanceResponse{
-		UserID:     userID,
-		BalanceIDR: user.BalanceIDR,
-		Currency:   "IDR",
-	}, nil
+	response := &BalanceResponse{
+		UserID:       userID,
+		Role:         string(user.Role),
+		MemberStatus: string(user.MemberStatus),
+		BalanceIDR:   user.BalanceIDR,
+		Currency:     "IDR",
+	}
+
+	// Role-specific balance info
+	if user.Role == models.RoleInvestor {
+		// For Investor: show funds in active investments
+		portfolio, err := s.fundingRepo.GetInvestorPortfolio(userID)
+		if err == nil && portfolio != nil {
+			response.ActiveFunding = portfolio.TotalFunding
+			response.ExpectedReturn = portfolio.TotalExpectedGain
+		}
+		response.Description = "Saldo dana yang tersedia untuk pendanaan"
+	} else if user.Role == models.RoleExporter || user.Role == models.RoleMitra {
+		// For Mitra: show total owed to investors
+		filter := &models.InvoiceFilter{
+			Page:    1,
+			PerPage: 1000,
+		}
+		invoices, _, _ := s.invoiceRepo.FindByExporter(userID, filter)
+
+		var totalOwed, totalInterest float64
+		for _, invoice := range invoices {
+			// Check for active invoices (funded or funding status)
+			if invoice.Status == models.StatusFunding || invoice.Status == models.StatusFunded || invoice.Status == models.StatusMatured {
+				pool, _ := s.fundingRepo.FindPoolByInvoiceID(invoice.ID)
+				if pool != nil {
+					// Calculate owed amount (principal + interest)
+					priorityOwed := pool.PriorityFunded * (1 + pool.PriorityInterestRate/100)
+					catalystOwed := pool.CatalystFunded * (1 + pool.CatalystInterestRate/100)
+					totalOwed += priorityOwed + catalystOwed
+					totalInterest += (pool.PriorityFunded * pool.PriorityInterestRate / 100) +
+						(pool.CatalystFunded * pool.CatalystInterestRate / 100)
+				}
+			}
+		}
+		response.TotalOwed = totalOwed
+		response.TotalInterest = totalInterest
+		response.Description = "Total kewajiban kepada pendana (pokok + bunga)"
+	}
+
+	return response, nil
 }
 
 // SimulateInvestmentPayment simulates payment for investment (PROTOTYPE)

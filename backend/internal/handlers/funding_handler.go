@@ -93,13 +93,27 @@ func (h *FundingHandler) CreatePool(c *gin.Context) {
 }
 
 // Invest godoc
-// @Summary Invest in a funding pool
-// @Description Make an investment in a funding pool
+// @Summary Invest in a funding pool with tranche selection
+// @Description Make an investment in a funding pool. Choose Priority (lower risk) or Catalyst (higher risk/return).
+// @Description
+// @Description **Priority Tranche Flow:**
+// @Description 1. Select amount and tranche=priority
+// @Description 2. Accept Terms & Conditions (tnc_accepted=true)
+// @Description 3. Submit
+// @Description
+// @Description **Catalyst Tranche Flow:**
+// @Description 1. Select amount and tranche=catalyst
+// @Description 2. Accept Terms & Conditions (tnc_accepted=true)
+// @Description 3. Accept all 3 risk consents in catalyst_consents:
+// @Description    - first_loss_consent: "Saya sadar dana ini menjadi jaminan pertama jika gagal bayar"
+// @Description    - risk_loss_consent: "Saya siap menanggung risiko kehilangan modal"
+// @Description    - not_bank_consent: "Saya paham ini bukan produk bank"
+// @Description 4. Submit
 // @Tags Funding
 // @Security BearerAuth
 // @Accept json
 // @Produce json
-// @Param request body models.InvestRequest true "Investment details"
+// @Param request body models.InvestRequest true "Investment details with consent"
 // @Success 201 {object} models.Investment
 // @Router /investments [post]
 func (h *FundingHandler) Invest(c *gin.Context) {
@@ -235,13 +249,12 @@ func (h *FundingHandler) GetPortfolio(c *gin.Context) {
 // @Success 200 {object} models.MitraDashboard
 // @Router /mitra/dashboard [get]
 func (h *FundingHandler) GetMitraDashboard(c *gin.Context) {
-	// Return placeholder data for now
-	// In a full implementation, this would query actual mitra financing data
-	dashboard := models.MitraDashboard{
-		TotalActiveFinancing:  0,
-		AverageRemainingTenor: 0,
-		ActiveInvoices:        []models.InvoiceDashboard{},
-		TimelineStatus:        "Belum ada pembiayaan aktif",
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	dashboard, err := h.fundingService.GetMitraDashboard(userID)
+	if err != nil {
+		utils.InternalServerError(c, "Failed to get mitra dashboard")
+		return
 	}
 
 	utils.SuccessResponse(c, dashboard)
@@ -334,6 +347,141 @@ func (h *FundingHandler) ExporterDisbursement(c *gin.Context) {
 	response, err := h.fundingService.ExporterDisbursementToInvestors(exporterID, &req)
 	if err != nil {
 		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, response)
+}
+
+// GetPoolDetail godoc
+// @Summary Get detailed pool information for investor
+// @Description Get comprehensive pool details including buyer/exporter info for investment decision
+// @Tags Marketplace
+// @Security BearerAuth
+// @Produce json
+// @Param id path string true "Pool ID"
+// @Success 200 {object} models.PoolDetailResponse
+// @Router /marketplace/{id}/detail [get]
+func (h *FundingHandler) GetPoolDetail(c *gin.Context) {
+	poolID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		utils.BadRequestError(c, "Invalid pool ID")
+		return
+	}
+
+	detail, err := h.fundingService.GetPoolDetail(poolID)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, detail)
+}
+
+// CalculateInvestment godoc
+// @Summary Calculate investment returns
+// @Description Calculate projected returns based on investment amount and tranche selection
+// @Tags Marketplace
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body models.InvestmentCalculatorRequest true "Calculator request"
+// @Success 200 {object} models.InvestmentCalculatorResponse
+// @Router /marketplace/calculate [post]
+func (h *FundingHandler) CalculateInvestment(c *gin.Context) {
+	var req models.InvestmentCalculatorRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestError(c, err.Error())
+		return
+	}
+
+	result, err := h.fundingService.CalculateInvestmentReturns(&req)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, result)
+}
+
+// ConfirmInvestment godoc
+// @Summary Confirm investment with acknowledgements
+// @Description Confirm investment after user acknowledges risks (especially for Catalyst tranche)
+// @Tags Investments
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body models.InvestConfirmationRequest true "Confirmation request"
+// @Success 201 {object} models.Investment
+// @Router /investments/confirm [post]
+func (h *FundingHandler) ConfirmInvestment(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req models.InvestConfirmationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestError(c, err.Error())
+		return
+	}
+
+	investment, err := h.fundingService.ConfirmInvestment(userID, &req)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.CreatedResponse(c, investment)
+}
+
+// GetActiveInvestments godoc
+// @Summary Get investor's active investments
+// @Description Get list of active investments with status and earnings details (Flow 10)
+// @Tags Investments
+// @Security BearerAuth
+// @Produce json
+// @Param page query int false "Page number"
+// @Param per_page query int false "Items per page"
+// @Success 200 {object} models.ActiveInvestmentListResponse
+// @Router /investments/active [get]
+func (h *FundingHandler) GetActiveInvestments(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var params models.PaginationParams
+	if err := c.ShouldBindQuery(&params); err != nil {
+		params = models.PaginationParams{Page: 1, PerPage: 10}
+	}
+	params.Normalize()
+
+	response, err := h.fundingService.GetActiveInvestments(userID, params.Page, params.PerPage)
+	if err != nil {
+		utils.InternalServerError(c, "Failed to get active investments")
+		return
+	}
+
+	utils.SuccessResponse(c, response)
+}
+
+// GetMitraActiveInvoices godoc
+// @Summary Get mitra's active invoices
+// @Description Get list of mitra's invoices with funding status (Flow 8)
+// @Tags Mitra
+// @Security BearerAuth
+// @Produce json
+// @Param page query int false "Page number"
+// @Param per_page query int false "Items per page"
+// @Success 200 {object} models.MitraInvoiceListResponse
+// @Router /mitra/invoices [get]
+func (h *FundingHandler) GetMitraActiveInvoices(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var params models.PaginationParams
+	if err := c.ShouldBindQuery(&params); err != nil {
+		params = models.PaginationParams{Page: 1, PerPage: 10}
+	}
+	params.Normalize()
+
+	response, err := h.fundingService.GetMitraActiveInvoices(userID, params.Page, params.PerPage)
+	if err != nil {
+		utils.InternalServerError(c, "Failed to get mitra invoices")
 		return
 	}
 

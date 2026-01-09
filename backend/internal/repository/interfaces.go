@@ -14,7 +14,6 @@ type UserRepositoryInterface interface {
 	FindByID(id uuid.UUID) (*models.User, error)
 	FindProfileByUserID(userID uuid.UUID) (*models.UserProfile, error)
 	UpdateProfile(userID uuid.UUID, req *models.UpdateProfileRequest) error
-	UpdateWallet(userID uuid.UUID, walletAddress string) error
 	UpdateBalance(userID uuid.UUID, amount float64) error
 	SetVerified(userID uuid.UUID, verified bool) error
 	SetEmailVerified(userID uuid.UUID, verified bool) error
@@ -22,7 +21,21 @@ type UserRepositoryInterface interface {
 	UpdateRole(userID uuid.UUID, role models.UserRole) error
 	EmailExists(email string) (bool, error)
 	UsernameExists(username string) (bool, error)
-	WalletExists(wallet string) (bool, error)
+
+	// Identity/KYC methods
+	CreateIdentity(identity *models.UserIdentity) error
+	FindIdentityByUserID(userID uuid.UUID) (*models.UserIdentity, error)
+	UpdateIdentity(identity *models.UserIdentity) error
+
+	// Bank Account methods
+	CreateBankAccount(account *models.BankAccount) error
+	FindBankAccountsByUserID(userID uuid.UUID) ([]models.BankAccount, error)
+	FindPrimaryBankAccount(userID uuid.UUID) (*models.BankAccount, error)
+	UpdateBankAccount(account *models.BankAccount) error
+	SetPrimaryBankAccount(userID, accountID uuid.UUID) error
+
+	// Password methods
+	UpdatePassword(userID uuid.UUID, hashedPassword string) error
 }
 
 // KYCRepositoryInterface defines the contract for KYC data operations
@@ -42,6 +55,7 @@ type BuyerRepositoryInterface interface {
 	Create(buyer *models.Buyer) error
 	FindByID(id uuid.UUID) (*models.Buyer, error)
 	FindByExporter(exporterID uuid.UUID, page, perPage int) ([]models.Buyer, int, error)
+	FindByCompanyName(companyName string, createdBy uuid.UUID) (*models.Buyer, error)
 	Update(buyer *models.Buyer) error
 	Delete(id uuid.UUID) error
 	UpdateCreditScore(id uuid.UUID, score int) error
@@ -55,6 +69,9 @@ type InvoiceRepositoryInterface interface {
 	FindByID(id uuid.UUID) (*models.Invoice, error)
 	FindByExporter(exporterID uuid.UUID, filter *models.InvoiceFilter) ([]models.Invoice, int, error)
 	FindFundable(page, perPage int) ([]models.Invoice, int, error)
+	FindAll(filter *models.InvoiceFilter) ([]models.Invoice, int, error)
+	CountByExporter(exporterID uuid.UUID) (int, error)
+	CountByBuyerID(buyerID uuid.UUID) (int, error)
 	Update(invoice *models.Invoice) error
 	UpdateStatus(id uuid.UUID, status models.InvoiceStatus) error
 	SetInterestRate(id uuid.UUID, rate float64) error
@@ -92,6 +109,7 @@ type FundingRepositoryInterface interface {
 	CreateInvestment(inv *models.Investment) error
 	FindInvestmentByID(id uuid.UUID) (*models.Investment, error)
 	FindInvestmentsByInvestor(investorID uuid.UUID, page, perPage int) ([]models.Investment, int, error)
+	FindActiveInvestmentsByInvestor(investorID uuid.UUID, page, perPage int) ([]models.Investment, int, error)
 	FindInvestmentsByPool(poolID uuid.UUID) ([]models.Investment, error)
 	FindInvestmentsByPoolAndTranche(poolID uuid.UUID, tranche models.TrancheType) ([]models.Investment, error)
 	UpdateInvestmentStatus(id uuid.UUID, status models.InvestmentStatus, actualReturn *float64) error

@@ -22,6 +22,68 @@ func NewInvoiceHandler(invoiceService *services.InvoiceService, blockchainServic
 	}
 }
 
+// CheckRepeatBuyer godoc
+// @Summary Check if buyer is repeat buyer (Flow 4 Pre-condition)
+// @Description Check transaction history to determine if buyer is a repeat buyer
+// @Tags Invoices
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body models.RepeatBuyerCheckRequest true "Buyer company name"
+// @Success 200 {object} models.RepeatBuyerCheckResponse
+// @Router /invoices/check-repeat-buyer [post]
+func (h *InvoiceHandler) CheckRepeatBuyer(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req models.RepeatBuyerCheckRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestError(c, err.Error())
+		return
+	}
+
+	response, err := h.invoiceService.CheckRepeatBuyer(userID, req.BuyerCompanyName)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, response)
+}
+
+// CreateFundingRequest godoc
+// @Summary Create invoice funding request (Flow 4)
+// @Description Mitra creates a funding request for their invoice
+// @Tags Invoices
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body models.CreateInvoiceFundingRequest true "Funding request details"
+// @Success 201 {object} models.Invoice
+// @Router /invoices/funding-request [post]
+func (h *InvoiceHandler) CreateFundingRequest(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req models.CreateInvoiceFundingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestError(c, err.Error())
+		return
+	}
+
+	// Validate data confirmation checkbox
+	if !req.DataConfirmation {
+		utils.BadRequestError(c, "Anda harus menyetujui bahwa data yang diberikan adalah benar dan asli")
+		return
+	}
+
+	invoice, err := h.invoiceService.CreateFundingRequest(userID, &req)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.CreatedResponse(c, invoice)
+}
+
 // CreateInvoice godoc
 // @Summary Create a new invoice
 // @Description Create a new invoice for export
@@ -330,15 +392,15 @@ func (h *InvoiceHandler) Tokenize(c *gin.Context) {
 // Admin handlers
 
 // ApproveInvoice godoc
-// @Summary Approve invoice (Admin)
-// @Description Approve an invoice pending review
+// @Summary Approve invoice (Admin) - Flow 5
+// @Description Approve an invoice, mint NFT, and create funding pool
 // @Tags Admin
 // @Security BearerAuth
 // @Accept json
 // @Produce json
 // @Param id path string true "Invoice ID"
-// @Param request body models.ApproveInvoiceRequest true "Approval details"
-// @Success 200 {object} map[string]string
+// @Param request body models.AdminApproveInvoiceRequest true "Approval details with grade"
+// @Success 200 {object} map[string]interface{}
 // @Router /admin/invoices/{id}/approve [post]
 func (h *InvoiceHandler) Approve(c *gin.Context) {
 	invoiceID, err := uuid.Parse(c.Param("id"))
@@ -347,23 +409,112 @@ func (h *InvoiceHandler) Approve(c *gin.Context) {
 		return
 	}
 
-	var req struct {
-		InterestRate float64 `json:"interest_rate" binding:"required"`
-	}
+	var req models.AdminApproveInvoiceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.BadRequestError(c, "Interest rate is required")
+		utils.BadRequestError(c, err.Error())
 		return
 	}
 
-	if err := h.invoiceService.Approve(invoiceID, req.InterestRate); err != nil {
+	// Approve with grade
+	if err := h.invoiceService.ApproveWithGrade(invoiceID, &req); err != nil {
 		utils.HandleAppError(c, err)
 		return
 	}
 
-	utils.SuccessResponse(c, gin.H{"message": "Invoice approved"})
+	// Auto-tokenize after approval
+	invoice, _ := h.invoiceService.GetByID(invoiceID)
+	var nft *models.InvoiceNFT
+	if h.blockchainService != nil && invoice != nil {
+		// Use system/platform address for NFT ownership since users don't have wallets
+		// NFT serves as on-chain proof of invoice, owned by platform
+		ownerAddress := "0x0000000000000000000000000000000000000000"
+		nft, _ = h.blockchainService.TokenizeInvoice(invoiceID, ownerAddress)
+	}
+
+	utils.SuccessResponse(c, gin.H{
+		"message":    "Invoice approved, tokenized, and ready for pool creation",
+		"invoice_id": invoiceID,
+		"grade":      req.Grade,
+		"nft":        nft,
+	})
 }
 
-// RejectInvoice godoc
+// GetGradeSuggestion godoc
+// @Summary Get grade suggestion for invoice (Admin) - BE-ADM-1
+// @Description Get AI-suggested grade based on risk matrix
+// @Tags Admin
+// @Security BearerAuth
+// @Produce json
+// @Param id path string true "Invoice ID"
+// @Success 200 {object} models.AdminGradeSuggestionResponse
+// @Router /admin/invoices/{id}/grade-suggestion [get]
+func (h *InvoiceHandler) GetGradeSuggestion(c *gin.Context) {
+	invoiceID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		utils.BadRequestError(c, "Invalid invoice ID")
+		return
+	}
+
+	suggestion, err := h.invoiceService.GetGradeSuggestion(invoiceID)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, suggestion)
+}
+
+// GetInvoiceReviewData godoc
+// @Summary Get invoice data for admin review (Flow 5 - Split Screen)
+// @Description Get all data needed for admin to review an invoice
+// @Tags Admin
+// @Security BearerAuth
+// @Produce json
+// @Param id path string true "Invoice ID"
+// @Success 200 {object} models.InvoiceReviewData
+// @Router /admin/invoices/{id}/review [get]
+func (h *InvoiceHandler) GetInvoiceReviewData(c *gin.Context) {
+	invoiceID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		utils.BadRequestError(c, "Invalid invoice ID")
+		return
+	}
+
+	reviewData, err := h.invoiceService.GetInvoiceReviewData(invoiceID)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, reviewData)
+}
+
+// GetPendingInvoices godoc
+// @Summary Get pending invoices for admin review
+// @Description Get all invoices pending admin review
+// @Tags Admin
+// @Security BearerAuth
+// @Produce json
+// @Param page query int false "Page number"
+// @Param per_page query int false "Items per page"
+// @Success 200 {object} models.InvoiceListResponse
+// @Router /admin/invoices/pending [get]
+func (h *InvoiceHandler) GetPendingInvoices(c *gin.Context) {
+	var params models.PaginationParams
+	if err := c.ShouldBindQuery(&params); err != nil {
+		params = models.PaginationParams{Page: 1, PerPage: 10}
+	}
+	params.Normalize()
+
+	response, err := h.invoiceService.GetPendingInvoices(params.Page, params.PerPage)
+	if err != nil {
+		utils.InternalServerError(c, "Failed to get pending invoices")
+		return
+	}
+
+	utils.SuccessResponse(c, response)
+}
+
 // @Summary Reject invoice (Admin)
 // @Description Reject an invoice pending review
 // @Tags Admin

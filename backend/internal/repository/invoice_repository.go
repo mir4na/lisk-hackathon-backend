@@ -431,3 +431,115 @@ func (r *InvoiceRepository) ApproveWithTransaction(id uuid.UUID, interestRate, a
 
 	return tx.Commit()
 }
+
+// FindAll finds invoices with optional filters
+func (r *InvoiceRepository) FindAll(filter *models.InvoiceFilter) ([]models.Invoice, int, error) {
+	var total int
+	countQuery := `SELECT COUNT(*) FROM invoices WHERE 1=1`
+	args := []interface{}{}
+	argCount := 0
+
+	if filter.Status != nil {
+		argCount++
+		countQuery += ` AND status = $` + string(rune('0'+argCount))
+		args = append(args, *filter.Status)
+	}
+	if filter.ExporterID != nil {
+		argCount++
+		countQuery += ` AND exporter_id = $` + string(rune('0'+argCount))
+		args = append(args, *filter.ExporterID)
+	}
+
+	if err := r.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	offset := (filter.Page - 1) * filter.PerPage
+	query := `
+		SELECT i.id, i.exporter_id, i.buyer_id, i.invoice_number, i.currency, i.amount, i.issue_date, i.due_date,
+		       i.description, i.status, i.interest_rate, i.advance_percentage, i.advance_amount, i.document_hash,
+		       i.created_at, i.updated_at,
+		       b.id, b.company_name, b.country, b.credit_score
+		FROM invoices i
+		LEFT JOIN buyers b ON i.buyer_id = b.id
+		WHERE 1=1
+	`
+
+	queryArgs := []interface{}{}
+	queryArgCount := 0
+
+	if filter.Status != nil {
+		queryArgCount++
+		query += ` AND i.status = $` + string(rune('0'+queryArgCount))
+		queryArgs = append(queryArgs, *filter.Status)
+	}
+	if filter.ExporterID != nil {
+		queryArgCount++
+		query += ` AND i.exporter_id = $` + string(rune('0'+queryArgCount))
+		queryArgs = append(queryArgs, *filter.ExporterID)
+	}
+
+	queryArgCount++
+	query += ` ORDER BY i.created_at DESC LIMIT $` + string(rune('0'+queryArgCount))
+	queryArgs = append(queryArgs, filter.PerPage)
+
+	queryArgCount++
+	query += ` OFFSET $` + string(rune('0'+queryArgCount))
+	queryArgs = append(queryArgs, offset)
+
+	rows, err := r.db.Query(query, queryArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var invoices []models.Invoice
+	for rows.Next() {
+		var invoice models.Invoice
+		var buyer models.Buyer
+		if err := rows.Scan(
+			&invoice.ID,
+			&invoice.ExporterID,
+			&invoice.BuyerID,
+			&invoice.InvoiceNumber,
+			&invoice.Currency,
+			&invoice.Amount,
+			&invoice.IssueDate,
+			&invoice.DueDate,
+			&invoice.Description,
+			&invoice.Status,
+			&invoice.InterestRate,
+			&invoice.AdvancePercentage,
+			&invoice.AdvanceAmount,
+			&invoice.DocumentHash,
+			&invoice.CreatedAt,
+			&invoice.UpdatedAt,
+			&buyer.ID,
+			&buyer.CompanyName,
+			&buyer.Country,
+			&buyer.CreditScore,
+		); err != nil {
+			return nil, 0, err
+		}
+		invoice.Buyer = &buyer
+		invoices = append(invoices, invoice)
+	}
+
+	return invoices, total, nil
+}
+
+// CountByExporter counts invoices by exporter
+func (r *InvoiceRepository) CountByExporter(exporterID uuid.UUID) (int, error) {
+	var count int
+	query := `SELECT COUNT(*) FROM invoices WHERE exporter_id = $1`
+	err := r.db.QueryRow(query, exporterID).Scan(&count)
+	return count, err
+}
+
+// CountByBuyerID counts invoices by buyer
+func (r *InvoiceRepository) CountByBuyerID(buyerID uuid.UUID) (int, error) {
+	var count int
+	query := `SELECT COUNT(*) FROM invoices WHERE buyer_id = $1`
+	err := r.db.QueryRow(query, buyerID).Scan(&count)
+	return count, err
+}

@@ -112,7 +112,7 @@ func (s *FundingService) CreatePool(invoiceID uuid.UUID) (*models.FundingPool, e
 		CatalystFunded:       0,
 		PriorityInterestRate: priorityInterestRate,
 		CatalystInterestRate: catalystInterestRate,
-		PoolCurrency:         "IDRX",
+		PoolCurrency:         "IDR",
 	}
 
 	if err := s.fundingRepo.CreatePool(pool); err != nil {
@@ -357,16 +357,16 @@ func (s *FundingService) Invest(investorID uuid.UUID, req *models.InvestRequest)
 		return nil, errors.New("pool is not open for investment")
 	}
 
-	// Check catalyst unlock for catalyst tranche
+	// Validate consent based on tranche type
+	// All investments require T&C acceptance
+	if !req.TncAccepted {
+		return nil, errors.New("you must accept Terms & Conditions to invest")
+	}
+
+	// Catalyst tranche requires additional consents (3 checkboxes)
 	if req.Tranche == models.TrancheCatalyst {
-		if s.rqRepo != nil {
-			unlocked, err := s.rqRepo.IsCatalystUnlocked(investorID)
-			if err != nil {
-				return nil, errors.New("failed to check catalyst eligibility")
-			}
-			if !unlocked {
-				return nil, errors.New("catalyst tranche not unlocked. Please complete risk questionnaire first")
-			}
+		if req.CatalystConsents == nil || !req.CatalystConsents.AllAccepted() {
+			return nil, errors.New("untuk Pendanaan Katalis, Anda harus menyetujui semua 3 pernyataan risiko")
 		}
 	}
 
@@ -388,20 +388,9 @@ func (s *FundingService) Invest(investorID uuid.UUID, req *models.InvestRequest)
 		return nil, errors.New("investment amount exceeds remaining tranche capacity")
 	}
 
-	// Get invoice for tenor calculation
-	invoice, err := s.invoiceRepo.FindByID(pool.InvoiceID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Calculate days until maturity
-	daysToMaturity := time.Until(invoice.DueDate).Hours() / 24
-	if daysToMaturity < 0 {
-		daysToMaturity = 0
-	}
-
-	// Pro-rata interest calculation: Principal * (1 + rate/100 * days/360)
-	expectedReturn := req.Amount * (1 + (interestRate/100)*(daysToMaturity/360))
+	// Flat interest calculation: Principal + (Principal * Rate/100)
+	// No time factor - interest is calculated flat from total principal
+	expectedReturn := req.Amount + (req.Amount * interestRate / 100)
 
 	investment := &models.Investment{
 		PoolID:         req.PoolID,
@@ -421,21 +410,30 @@ func (s *FundingService) Invest(investorID uuid.UUID, req *models.InvestRequest)
 		return nil, err
 	}
 
-	// Create transaction record
+	// Create transaction record (using IDR - abstracted escrow for MVP)
 	tx := &models.Transaction{
 		InvoiceID: &pool.InvoiceID,
 		UserID:    &investorID,
 		Type:      models.TxTypeInvestment,
 		Amount:    req.Amount,
-		Currency:  "IDRX",
+		Currency:  "IDR",
 		Status:    models.TxStatusPending,
 	}
 	s.txRepo.Create(tx)
 
-	// Check if pool is now filled (both tranches)
+	// Check if pool is now filled (both tranches) - Flow 7: Auto-Disbursement
 	updatedPool, _ := s.fundingRepo.FindPoolByID(req.PoolID)
 	if updatedPool.FundedAmount >= updatedPool.TargetAmount {
 		s.fundingRepo.UpdatePoolStatus(req.PoolID, models.PoolStatusFilled)
+
+		// Trigger automatic disbursement to mitra (Flow 7)
+		go func() {
+			if err := s.DisburseToExporter(req.PoolID); err != nil {
+				// Log error but don't fail investment
+				// In production, this would alert admins
+				_ = err
+			}
+		}()
 	}
 
 	return investment, nil
@@ -790,18 +788,18 @@ type ExporterDisbursementRequest struct {
 
 // ExporterDisbursementResponse represents the disbursement result
 type ExporterDisbursementResponse struct {
-	PoolID               uuid.UUID                  `json:"pool_id"`
-	InvoiceID            uuid.UUID                  `json:"invoice_id"`
-	TotalRequired        float64                    `json:"total_required"`         // Total amount required (principal + interest)
-	TotalPaid            float64                    `json:"total_paid"`             // Amount exporter paid
-	TotalDisbursed       float64                    `json:"total_disbursed"`        // Amount disbursed to investors
-	PriorityDisbursed    float64                    `json:"priority_disbursed"`     // Amount to priority investors
-	CatalystDisbursed    float64                    `json:"catalyst_disbursed"`     // Amount to catalyst investors
-	PriorityFullyPaid    bool                       `json:"priority_fully_paid"`
-	CatalystFullyPaid    bool                       `json:"catalyst_fully_paid"`
-	InvestorDisbursements []InvestorDisbursement    `json:"investor_disbursements"`
-	Status               string                     `json:"status"`
-	Message              string                     `json:"message"`
+	PoolID                uuid.UUID              `json:"pool_id"`
+	InvoiceID             uuid.UUID              `json:"invoice_id"`
+	TotalRequired         float64                `json:"total_required"`     // Total amount required (principal + interest)
+	TotalPaid             float64                `json:"total_paid"`         // Amount exporter paid
+	TotalDisbursed        float64                `json:"total_disbursed"`    // Amount disbursed to investors
+	PriorityDisbursed     float64                `json:"priority_disbursed"` // Amount to priority investors
+	CatalystDisbursed     float64                `json:"catalyst_disbursed"` // Amount to catalyst investors
+	PriorityFullyPaid     bool                   `json:"priority_fully_paid"`
+	CatalystFullyPaid     bool                   `json:"catalyst_fully_paid"`
+	InvestorDisbursements []InvestorDisbursement `json:"investor_disbursements"`
+	Status                string                 `json:"status"`
+	Message               string                 `json:"message"`
 }
 
 // InvestorDisbursement represents disbursement to a single investor
@@ -890,10 +888,8 @@ func (s *FundingService) ExporterDisbursementToInvestors(exporterID uuid.UUID, r
 	// STEP 1: Pay Priority Tranche First
 	for _, inv := range priorityInvestments {
 		investor, _ := s.userRepo.FindByID(inv.InvestorID)
-		walletAddress := ""
-		if investor != nil && investor.WalletAddress != nil {
-			walletAddress = *investor.WalletAddress
-		}
+		// Note: WalletAddress removed - funds go to registered bank account
+		_ = investor // investor data available for bank account lookup
 
 		var actualReturn float64
 		var status string
@@ -919,12 +915,12 @@ func (s *FundingService) ExporterDisbursementToInvestors(exporterID uuid.UUID, r
 		if actualReturn > 0 {
 			disbursementTargets = append(disbursementTargets, DisbursementTarget{
 				InvestorID:    inv.InvestorID,
-				WalletAddress: walletAddress,
+				WalletAddress: "", // Deprecated - funds go to bank account
 				Amount:        actualReturn,
 				Principal:     inv.Amount,
 				ReturnAmount:  actualReturn - inv.Amount,
 				Tranche:       string(models.TranchePriority),
-				Currency:      "IDRX",
+				Currency:      "IDR",
 			})
 			priorityDisbursed += actualReturn
 
@@ -950,7 +946,7 @@ func (s *FundingService) ExporterDisbursementToInvestors(exporterID uuid.UUID, r
 
 		investorDisbursements = append(investorDisbursements, InvestorDisbursement{
 			InvestorID:     inv.InvestorID,
-			WalletAddress:  walletAddress,
+			WalletAddress:  "", // Deprecated - funds go to bank account
 			Tranche:        string(models.TranchePriority),
 			Principal:      inv.Amount,
 			ExpectedReturn: inv.ExpectedReturn,
@@ -962,10 +958,8 @@ func (s *FundingService) ExporterDisbursementToInvestors(exporterID uuid.UUID, r
 	// STEP 2: Pay Catalyst Tranche (only if there's remaining funds)
 	for _, inv := range catalystInvestments {
 		investor, _ := s.userRepo.FindByID(inv.InvestorID)
-		walletAddress := ""
-		if investor != nil && investor.WalletAddress != nil {
-			walletAddress = *investor.WalletAddress
-		}
+		// Note: WalletAddress removed - funds go to registered bank account
+		_ = investor // investor data available for bank account lookup
 
 		var actualReturn float64
 		var status string
@@ -991,12 +985,12 @@ func (s *FundingService) ExporterDisbursementToInvestors(exporterID uuid.UUID, r
 		if actualReturn > 0 {
 			disbursementTargets = append(disbursementTargets, DisbursementTarget{
 				InvestorID:    inv.InvestorID,
-				WalletAddress: walletAddress,
+				WalletAddress: "", // Deprecated - funds go to bank account
 				Amount:        actualReturn,
 				Principal:     inv.Amount,
 				ReturnAmount:  actualReturn - inv.Amount,
 				Tranche:       string(models.TrancheCatalyst),
-				Currency:      "IDRX",
+				Currency:      "IDR",
 			})
 			catalystDisbursed += actualReturn
 
@@ -1026,7 +1020,7 @@ func (s *FundingService) ExporterDisbursementToInvestors(exporterID uuid.UUID, r
 
 		investorDisbursements = append(investorDisbursements, InvestorDisbursement{
 			InvestorID:     inv.InvestorID,
-			WalletAddress:  walletAddress,
+			WalletAddress:  "", // Deprecated - funds go to bank account
 			Tranche:        string(models.TrancheCatalyst),
 			Principal:      inv.Amount,
 			ExpectedReturn: inv.ExpectedReturn,
@@ -1077,5 +1071,647 @@ func (s *FundingService) ExporterDisbursementToInvestors(exporterID uuid.UUID, r
 		InvestorDisbursements: investorDisbursements,
 		Status:                status,
 		Message:               message,
+	}, nil
+}
+
+// GetPoolDetail returns comprehensive pool details for investor decision making (Flow 6)
+func (s *FundingService) GetPoolDetail(poolID uuid.UUID) (*models.PoolDetailResponse, error) {
+	pool, err := s.fundingRepo.FindPoolByID(poolID)
+	if err != nil {
+		return nil, err
+	}
+	if pool == nil {
+		return nil, errors.New("pool not found")
+	}
+
+	invoice, err := s.invoiceRepo.FindByID(pool.InvoiceID)
+	if err != nil {
+		return nil, err
+	}
+
+	var buyer *models.Buyer
+	if invoice.BuyerID != uuid.Nil {
+		buyer, _ = s.buyerRepo.FindByID(invoice.BuyerID)
+	}
+
+	exporter, _ := s.userRepo.FindByID(invoice.ExporterID)
+
+	// Calculate remaining amounts
+	priorityRemaining := pool.PriorityTarget - pool.PriorityFunded
+	catalystRemaining := pool.CatalystTarget - pool.CatalystFunded
+	totalRemaining := priorityRemaining + catalystRemaining
+
+	// Calculate progress
+	priorityProgress := 0.0
+	if pool.PriorityTarget > 0 {
+		priorityProgress = (pool.PriorityFunded / pool.PriorityTarget) * 100
+	}
+	catalystProgress := 0.0
+	if pool.CatalystTarget > 0 {
+		catalystProgress = (pool.CatalystFunded / pool.CatalystTarget) * 100
+	}
+	totalProgress := 0.0
+	if pool.TargetAmount > 0 {
+		totalProgress = (pool.FundedAmount / pool.TargetAmount) * 100
+	}
+
+	// Calculate remaining time
+	remainingTime := ""
+	remainingHours := 0
+	if pool.Deadline != nil {
+		duration := time.Until(*pool.Deadline)
+		remainingHours = int(duration.Hours())
+		if remainingHours > 24 {
+			remainingTime = fmt.Sprintf("%d hari", remainingHours/24)
+		} else if remainingHours > 0 {
+			remainingTime = fmt.Sprintf("%d jam", remainingHours)
+		} else {
+			remainingTime = "Berakhir"
+		}
+	}
+
+	// Calculate tenor
+	tenorDays := int(time.Until(invoice.DueDate).Hours() / 24)
+	if tenorDays < 0 {
+		tenorDays = 0
+	}
+
+	// Build buyer info
+	buyerInfo := models.BuyerDetailInfo{}
+	if buyer != nil {
+		buyerInfo = models.BuyerDetailInfo{
+			CompanyName:  buyer.CompanyName,
+			Country:      buyer.Country,
+			CountryFlag:  getCountryFlag(buyer.Country),
+			CountryRisk:  getCountryRisk(buyer.Country),
+			Industry:     "", // Buyer doesn't have industry field
+			IsRepeat:     s.isRepeatBuyer(buyer.ID),
+			TotalHistory: s.getBuyerHistoryCount(buyer.ID),
+		}
+	}
+
+	// Build exporter info
+	exporterInfo := models.ExporterDetailInfo{}
+	if exporter != nil {
+		companyName := ""
+		if exporter.Profile != nil {
+			companyName = exporter.Profile.FullName
+		}
+		exporterInfo = models.ExporterDetailInfo{
+			CompanyName:     companyName,
+			IsVerified:      exporter.IsVerified,
+			CreditLimit:     0, // Would need to add to User model
+			AvailableCredit: 0, // Would need to add to User model
+			TotalInvoices:   s.getExporterInvoiceCount(exporter.ID),
+			SuccessRate:     s.getExporterSuccessRate(exporter.ID),
+		}
+	}
+
+	// Build documents info
+	documents := []models.DocumentInfo{}
+	if invoice.DocumentHash != nil {
+		documents = append(documents, models.DocumentInfo{
+			Type:       "invoice",
+			TypeLabel:  "Invoice Dokumen",
+			IsVerified: true,
+			IPFSHash:   *invoice.DocumentHash,
+		})
+	}
+
+	// Build tranche info
+	priorityTranche := models.TrancheInfo{
+		Type:                "priority",
+		TypeDisplay:         "Prioritas",
+		Description:         "Pembayaran didahulukan saat eksportir melakukan pencairan.",
+		TargetAmount:        pool.PriorityTarget,
+		FundedAmount:        pool.PriorityFunded,
+		RemainingAmount:     priorityRemaining,
+		ProgressPercent:     priorityProgress,
+		InterestRate:        pool.PriorityInterestRate,
+		InterestRateDisplay: fmt.Sprintf("%.1f%% p.a", pool.PriorityInterestRate),
+		RiskLevel:           "Low",
+		RiskLevelDisplay:    "Risiko Rendah",
+		InfoBox:             "Tranche Prioritas mendapat pembayaran terlebih dahulu dari hasil pelunasan. Cocok untuk pendana yang mengutamakan keamanan.",
+	}
+
+	catalystTranche := models.TrancheInfo{
+		Type:                "catalyst",
+		TypeDisplay:         "Katalis",
+		Description:         "Pembayaran dilakukan setelah Prioritas, dengan imbal hasil lebih tinggi.",
+		TargetAmount:        pool.CatalystTarget,
+		FundedAmount:        pool.CatalystFunded,
+		RemainingAmount:     catalystRemaining,
+		ProgressPercent:     catalystProgress,
+		InterestRate:        pool.CatalystInterestRate,
+		InterestRateDisplay: fmt.Sprintf("%.1f%% p.a", pool.CatalystInterestRate),
+		RiskLevel:           "Medium-High",
+		RiskLevelDisplay:    "Risiko Menengah-Tinggi",
+		InfoBox:             "Tranche Katalis dibayar setelah Prioritas. Imbal hasil lebih tinggi, namun dalam kondisi gagal bayar berisiko tidak menerima pembayaran penuh.",
+	}
+
+	// Get grade and score (handle nil pointers)
+	grade := ""
+	if invoice.Grade != nil {
+		grade = *invoice.Grade
+	}
+	gradeScore := 0
+	if invoice.GradeScore != nil {
+		gradeScore = *invoice.GradeScore
+	}
+
+	// Handle Description pointer
+	description := ""
+	if invoice.Description != nil {
+		description = *invoice.Description
+	}
+
+	return &models.PoolDetailResponse{
+		PoolID:          pool.ID,
+		InvoiceID:       invoice.ID,
+		ProjectTitle:    fmt.Sprintf("%s #%s", description, invoice.InvoiceNumber),
+		InvoiceNumber:   invoice.InvoiceNumber,
+		Grade:           grade,
+		GradeScore:      gradeScore,
+		IsInsured:       invoice.IsInsured,
+		TargetAmount:    pool.TargetAmount,
+		FundedAmount:    pool.FundedAmount,
+		RemainingAmount: totalRemaining,
+		FundingProgress: totalProgress,
+		TenorDays:       tenorDays,
+		TenorDisplay:    fmt.Sprintf("%d Hari", tenorDays),
+		DueDate:         &invoice.DueDate,
+		Deadline:        pool.Deadline,
+		RemainingTime:   remainingTime,
+		RemainingHours:  remainingHours,
+		Status:          string(pool.Status),
+		Currency:        pool.PoolCurrency,
+		BuyerInfo:       buyerInfo,
+		ExporterInfo:    exporterInfo,
+		Documents:       documents,
+		PriorityTranche: priorityTranche,
+		CatalystTranche: catalystTranche,
+	}, nil
+}
+
+// Helper functions
+func (s *FundingService) isRepeatBuyer(buyerID uuid.UUID) bool {
+	count, _ := s.invoiceRepo.CountByBuyerID(buyerID)
+	return count > 0
+}
+
+func (s *FundingService) getBuyerHistoryCount(buyerID uuid.UUID) int {
+	count, _ := s.invoiceRepo.CountByBuyerID(buyerID)
+	return count
+}
+
+func (s *FundingService) getExporterInvoiceCount(exporterID uuid.UUID) int {
+	count, _ := s.invoiceRepo.CountByExporter(exporterID)
+	return count
+}
+
+func (s *FundingService) getExporterSuccessRate(exporterID uuid.UUID) float64 {
+	// Placeholder - would calculate from actual repayment data
+	return 100.0
+}
+
+func getCountryFlag(country string) string {
+	flags := map[string]string{
+		"Indonesia":      "🇮🇩",
+		"United States":  "🇺🇸",
+		"Germany":        "🇩🇪",
+		"Japan":          "🇯🇵",
+		"South Korea":    "🇰🇷",
+		"Singapore":      "🇸🇬",
+		"Australia":      "🇦🇺",
+		"Netherlands":    "🇳🇱",
+		"United Kingdom": "🇬🇧",
+		"France":         "🇫🇷",
+		"China":          "🇨🇳",
+		"India":          "🇮🇳",
+		"Malaysia":       "🇲🇾",
+		"Thailand":       "🇹🇭",
+		"Vietnam":        "🇻🇳",
+	}
+	if flag, ok := flags[country]; ok {
+		return flag
+	}
+	return "🏳️"
+}
+
+func getCountryRisk(country string) string {
+	// Tier 1 - Low Risk
+	tier1 := []string{"United States", "Germany", "Japan", "South Korea", "Singapore", "Australia", "Netherlands", "United Kingdom", "France"}
+	for _, c := range tier1 {
+		if c == country {
+			return "Low"
+		}
+	}
+	// Tier 2 - Medium Risk
+	tier2 := []string{"China", "India", "Indonesia", "Malaysia", "Thailand", "Vietnam"}
+	for _, c := range tier2 {
+		if c == country {
+			return "Medium"
+		}
+	}
+	// Default - High Risk
+	return "High"
+}
+
+// CalculateInvestmentReturns calculates projected returns for investment calculator (Flow 6)
+func (s *FundingService) CalculateInvestmentReturns(req *models.InvestmentCalculatorRequest) (*models.InvestmentCalculatorResponse, error) {
+	pool, err := s.fundingRepo.FindPoolByID(req.PoolID)
+	if err != nil {
+		return nil, err
+	}
+	if pool == nil {
+		return nil, errors.New("pool not found")
+	}
+
+	invoice, err := s.invoiceRepo.FindByID(pool.InvoiceID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get interest rate based on tranche
+	var interestRate float64
+	var maxInvestable float64
+	var trancheDisplay string
+
+	if req.Tranche == string(models.TranchePriority) {
+		interestRate = pool.PriorityInterestRate
+		maxInvestable = pool.PriorityTarget - pool.PriorityFunded
+		trancheDisplay = "Prioritas"
+	} else {
+		interestRate = pool.CatalystInterestRate
+		maxInvestable = pool.CatalystTarget - pool.CatalystFunded
+		trancheDisplay = "Katalis"
+	}
+
+	// Calculate tenor in days (for display only)
+	tenorDays := int(time.Until(invoice.DueDate).Hours() / 24)
+	if tenorDays < 0 {
+		tenorDays = 0
+	}
+	if tenorDays == 0 {
+		tenorDays = 60 // Default
+	}
+
+	// Flat interest calculation: Interest = Principal × (Rate/100)
+	// No time factor - bunga dihitung flat dari total nominal
+	interestAmount := req.Amount * (interestRate / 100)
+	totalReturn := req.Amount + interestAmount
+	effectiveRate := interestRate // Same as nominal rate for flat calculation
+
+	// Platform fee (2% of interest)
+	platformFee := interestAmount * 0.02
+	netInterest := interestAmount - platformFee
+	netTotal := req.Amount + netInterest
+
+	return &models.InvestmentCalculatorResponse{
+		PoolID:         req.PoolID,
+		Tranche:        req.Tranche,
+		TrancheDisplay: trancheDisplay,
+		Principal:      req.Amount,
+		InterestRate:   interestRate,
+		TenorDays:      tenorDays,
+		GrossInterest:  interestAmount,
+		PlatformFee:    platformFee,
+		NetInterest:    netInterest,
+		TotalReturn:    totalReturn,
+		NetTotalReturn: netTotal,
+		EffectiveRate:  effectiveRate,
+		MaxInvestable:  maxInvestable,
+		CanInvest:      req.Amount <= maxInvestable && req.Amount > 0,
+		Message:        fmt.Sprintf("Estimasi imbal hasil untuk %s tranche", trancheDisplay),
+	}, nil
+}
+
+// ConfirmInvestment processes investment after user confirms acknowledgements (Flow 6)
+func (s *FundingService) ConfirmInvestment(userID uuid.UUID, req *models.InvestConfirmationRequest) (*models.Investment, error) {
+	// Validate acknowledgements for Catalyst tranche
+	if req.Tranche == string(models.TrancheCatalyst) {
+		if !req.CatalystWarning1 || !req.CatalystWarning2 {
+			return nil, errors.New("anda harus menyetujui semua risiko tranche Katalis sebelum melanjutkan")
+		}
+	}
+
+	// Create investment request
+	investReq := &models.InvestRequest{
+		PoolID:  req.PoolID,
+		Amount:  req.Amount,
+		Tranche: models.TrancheType(req.Tranche),
+	}
+
+	return s.Invest(userID, investReq)
+}
+
+// GetActiveInvestments returns paginated list of investor's active investments (Flow 10)
+func (s *FundingService) GetActiveInvestments(userID uuid.UUID, page, perPage int) (*models.ActiveInvestmentListResponse, error) {
+	investments, total, err := s.fundingRepo.FindActiveInvestmentsByInvestor(userID, page, perPage)
+	if err != nil {
+		return nil, err
+	}
+
+	activeInvestments := make([]models.InvestorActiveInvestment, 0, len(investments))
+
+	for _, inv := range investments {
+		pool, _ := s.fundingRepo.FindPoolByID(inv.PoolID)
+		var invoice *models.Invoice
+		var buyer *models.Buyer
+
+		if pool != nil {
+			invoice, _ = s.invoiceRepo.FindByID(pool.InvoiceID)
+			if invoice != nil && invoice.BuyerID != uuid.Nil {
+				buyer, _ = s.buyerRepo.FindByID(invoice.BuyerID)
+			}
+		}
+
+		projectName := "Unknown"
+		invoiceNumber := ""
+		buyerName := ""
+		buyerCountry := ""
+		buyerFlag := ""
+		var dueDate time.Time
+
+		if invoice != nil {
+			if invoice.Description != nil {
+				projectName = *invoice.Description
+			}
+			invoiceNumber = invoice.InvoiceNumber
+			dueDate = invoice.DueDate
+		}
+
+		if buyer != nil {
+			buyerName = buyer.CompanyName
+			buyerCountry = buyer.Country
+			buyerFlag = getCountryFlag(buyer.Country)
+		}
+
+		// Calculate days remaining
+		daysRemaining := int(time.Until(dueDate).Hours() / 24)
+		if daysRemaining < 0 {
+			daysRemaining = 0
+		}
+
+		// Determine status
+		status := "lancar"
+		statusDisplay := "Lancar"
+		statusColor := "green"
+		if daysRemaining <= 7 && daysRemaining > 0 {
+			status = "perhatian"
+			statusDisplay = "Perhatian"
+			statusColor = "yellow"
+		} else if daysRemaining == 0 || inv.Status == models.InvestmentStatusDefaulted {
+			status = "gagal_bayar"
+			statusDisplay = "Gagal Bayar"
+			statusColor = "red"
+		}
+
+		// Get interest rate
+		interestRate := 0.0
+		if pool != nil {
+			if inv.Tranche == models.TranchePriority {
+				interestRate = pool.PriorityInterestRate
+			} else {
+				interestRate = pool.CatalystInterestRate
+			}
+		}
+
+		trancheDisplay := "Prioritas"
+		if inv.Tranche == models.TrancheCatalyst {
+			trancheDisplay = "Katalis"
+		}
+
+		activeInvestments = append(activeInvestments, models.InvestorActiveInvestment{
+			InvestmentID:    inv.ID,
+			ProjectName:     projectName,
+			InvoiceNumber:   invoiceNumber,
+			BuyerName:       buyerName,
+			BuyerCountry:    buyerCountry,
+			BuyerFlag:       buyerFlag,
+			Tranche:         string(inv.Tranche),
+			TrancheDisplay:  trancheDisplay,
+			Principal:       inv.Amount,
+			InterestRate:    interestRate,
+			EstimatedReturn: inv.ExpectedReturn,
+			TotalExpected:   inv.Amount + inv.ExpectedReturn,
+			DueDate:         dueDate,
+			DaysRemaining:   daysRemaining,
+			Status:          status,
+			StatusDisplay:   statusDisplay,
+			StatusColor:     statusColor,
+			InvestedAt:      inv.InvestedAt,
+		})
+	}
+
+	totalPages := (total + perPage - 1) / perPage
+
+	return &models.ActiveInvestmentListResponse{
+		Investments: activeInvestments,
+		Total:       total,
+		Page:        page,
+		PerPage:     perPage,
+		TotalPages:  totalPages,
+	}, nil
+}
+
+// GetMitraActiveInvoices returns paginated list of mitra's invoices with funding status (Flow 8)
+func (s *FundingService) GetMitraActiveInvoices(userID uuid.UUID, page, perPage int) (*models.MitraInvoiceListResponse, error) {
+	// Get invoices by exporter
+	filter := &models.InvoiceFilter{
+		Page:    page,
+		PerPage: perPage,
+	}
+	invoices, total, err := s.invoiceRepo.FindByExporter(userID, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	invoiceDashboards := make([]models.InvoiceDashboard, 0, len(invoices))
+
+	for _, invoice := range invoices {
+		var buyer *models.Buyer
+		if invoice.BuyerID != uuid.Nil {
+			buyer, _ = s.buyerRepo.FindByID(invoice.BuyerID)
+		}
+
+		buyerName := ""
+		buyerCountry := ""
+		if buyer != nil {
+			buyerName = buyer.CompanyName
+			buyerCountry = buyer.Country
+		}
+
+		// Get pool for funded amount
+		pool, _ := s.fundingRepo.FindPoolByInvoiceID(invoice.ID)
+		fundedAmount := 0.0
+		if pool != nil {
+			fundedAmount = pool.FundedAmount
+		}
+
+		// Calculate days remaining
+		dueDate := invoice.DueDate
+		daysRemaining := int(time.Until(dueDate).Hours() / 24)
+		if daysRemaining < 0 {
+			daysRemaining = 0
+		}
+
+		// Determine status
+		status := "Aktif"
+		statusColor := "green"
+		if daysRemaining <= 7 && daysRemaining > 0 {
+			status = "Dalam Pengawasan"
+			statusColor = "yellow"
+		} else if daysRemaining < 0 {
+			status = "Terlambat"
+			statusColor = "red"
+		}
+
+		// Calculate total owed (with interest)
+		amount := invoice.Amount
+		totalOwed := amount // Would calculate with interest in real implementation
+
+		invoiceDashboards = append(invoiceDashboards, models.InvoiceDashboard{
+			InvoiceID:     invoice.ID,
+			InvoiceNumber: invoice.InvoiceNumber,
+			BuyerName:     buyerName,
+			BuyerCountry:  buyerCountry,
+			DueDate:       dueDate,
+			Amount:        amount,
+			Status:        status,
+			StatusColor:   statusColor,
+			DaysRemaining: daysRemaining,
+			FundedAmount:  fundedAmount,
+			TotalOwed:     totalOwed,
+		})
+	}
+
+	totalPages := (total + perPage - 1) / perPage
+
+	return &models.MitraInvoiceListResponse{
+		Invoices:   invoiceDashboards,
+		Total:      total,
+		Page:       page,
+		PerPage:    perPage,
+		TotalPages: totalPages,
+	}, nil
+}
+
+// GetMitraDashboard returns comprehensive dashboard data for mitra (Flow 8)
+func (s *FundingService) GetMitraDashboard(userID uuid.UUID) (*models.MitraDashboard, error) {
+	// Get all active invoices for this mitra
+	filter := &models.InvoiceFilter{
+		Page:    1,
+		PerPage: 100,
+	}
+	invoices, _, err := s.invoiceRepo.FindByExporter(userID, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	var totalActiveFinancing float64
+	var totalOwedToInvestors float64
+	var totalDaysRemaining int
+	var activeCount int
+
+	activeInvoices := make([]models.InvoiceDashboard, 0)
+
+	for _, invoice := range invoices {
+		// Skip non-active invoices
+		if invoice.Status == models.StatusDraft || invoice.Status == models.StatusRepaid || invoice.Status == models.StatusRejected {
+			continue
+		}
+
+		// Get pool for this invoice
+		pool, _ := s.fundingRepo.FindPoolByInvoiceID(invoice.ID)
+		fundedAmount := 0.0
+		if pool != nil && pool.Status != models.PoolStatusClosed {
+			fundedAmount = pool.FundedAmount
+
+			// Calculate total owed (principal + interest)
+			priorityOwed := pool.PriorityFunded * (1 + pool.PriorityInterestRate/100)
+			catalystOwed := pool.CatalystFunded * (1 + pool.CatalystInterestRate/100)
+			totalOwedToInvestors += priorityOwed + catalystOwed
+		}
+
+		// Get buyer info
+		var buyer *models.Buyer
+		if invoice.BuyerID != uuid.Nil {
+			buyer, _ = s.buyerRepo.FindByID(invoice.BuyerID)
+		}
+
+		buyerName := ""
+		buyerCountry := ""
+		if buyer != nil {
+			buyerName = buyer.CompanyName
+			buyerCountry = buyer.Country
+		}
+
+		// Calculate days remaining
+		dueDate := invoice.DueDate
+		daysRemaining := int(time.Until(dueDate).Hours() / 24)
+		if daysRemaining < 0 {
+			daysRemaining = 0
+		}
+
+		// Determine status
+		status := "Aktif"
+		statusColor := "green"
+		if daysRemaining <= 7 && daysRemaining > 0 {
+			status = "Dalam Pengawasan"
+			statusColor = "yellow"
+		} else if daysRemaining < 0 {
+			status = "Terlambat"
+			statusColor = "red"
+		}
+
+		if fundedAmount > 0 {
+			totalActiveFinancing += fundedAmount
+			totalDaysRemaining += daysRemaining
+			activeCount++
+		}
+
+		// Calculate total owed
+		amount := invoice.Amount
+		totalOwed := amount
+
+		activeInvoices = append(activeInvoices, models.InvoiceDashboard{
+			InvoiceID:     invoice.ID,
+			InvoiceNumber: invoice.InvoiceNumber,
+			BuyerName:     buyerName,
+			BuyerCountry:  buyerCountry,
+			DueDate:       dueDate,
+			Amount:        amount,
+			Status:        status,
+			StatusColor:   statusColor,
+			DaysRemaining: daysRemaining,
+			FundedAmount:  fundedAmount,
+			TotalOwed:     totalOwed,
+		})
+	}
+
+	// Calculate average remaining tenor
+	averageTenor := 0
+	if activeCount > 0 {
+		averageTenor = totalDaysRemaining / activeCount
+	}
+
+	// Determine timeline status
+	timelineStatus := models.TimelineStatus{
+		FundraisingComplete:  totalActiveFinancing > 0,
+		DisbursementComplete: false, // Would check actual disbursement status
+		RepaymentComplete:    false,
+		CurrentStep:          "Menunggu pembiayaan",
+	}
+	if totalActiveFinancing > 0 {
+		timelineStatus.CurrentStep = "Pembiayaan aktif"
+	}
+
+	return &models.MitraDashboard{
+		TotalActiveFinancing:  totalActiveFinancing,
+		TotalOwedToInvestors:  totalOwedToInvestors,
+		AverageRemainingTenor: averageTenor,
+		ActiveInvoices:        activeInvoices,
+		TimelineStatus:        timelineStatus,
 	}, nil
 }

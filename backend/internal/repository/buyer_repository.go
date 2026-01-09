@@ -175,3 +175,39 @@ func (r *BuyerRepository) SetVerified(id uuid.UUID, verified bool) error {
 	_, err := r.db.Exec(query, verified, time.Now(), id)
 	return err
 }
+
+// FindByCompanyName finds a buyer by company name created by specific exporter
+func (r *BuyerRepository) FindByCompanyName(companyName string, createdBy uuid.UUID) (*models.Buyer, error) {
+	buyer := &models.Buyer{}
+	query := `
+		SELECT id, created_by, company_name, country, address, contact_email, contact_phone, website,
+		       credit_score, total_invoices, total_paid, total_defaulted, is_verified, created_at, updated_at
+		FROM buyers
+		WHERE LOWER(company_name) = LOWER($1) AND created_by = $2
+		LIMIT 1
+	`
+	err := r.db.QueryRow(query, companyName, createdBy).Scan(
+		&buyer.ID,
+		&buyer.CreatedBy,
+		&buyer.CompanyName,
+		&buyer.Country,
+		&buyer.Address,
+		&buyer.ContactEmail,
+		&buyer.ContactPhone,
+		&buyer.Website,
+		&buyer.CreditScore,
+		&buyer.TotalInvoices,
+		&buyer.TotalPaid,
+		&buyer.TotalDefaulted,
+		&buyer.IsVerified,
+		&buyer.CreatedAt,
+		&buyer.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return buyer, nil
+}

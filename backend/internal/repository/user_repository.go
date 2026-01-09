@@ -25,8 +25,8 @@ func (r *UserRepository) Create(user *models.User, profile *models.UserProfile) 
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO users (email, username, phone_number, password_hash, role, wallet_address, is_verified, is_active, cooperative_agreement, member_status, balance_idr, email_verified)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		INSERT INTO users (email, username, phone_number, password_hash, role, is_verified, is_active, cooperative_agreement, member_status, balance_idr, email_verified)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, created_at, updated_at
 	`
 	err = tx.QueryRow(
@@ -36,7 +36,6 @@ func (r *UserRepository) Create(user *models.User, profile *models.UserProfile) 
 		user.PhoneNumber,
 		user.PasswordHash,
 		user.Role,
-		user.WalletAddress,
 		user.IsVerified,
 		user.IsActive,
 		user.CooperativeAgreement,
@@ -86,7 +85,7 @@ func (r *UserRepository) Create(user *models.User, profile *models.UserProfile) 
 func (r *UserRepository) FindByEmail(email string) (*models.User, error) {
 	user := &models.User{}
 	query := `
-		SELECT id, email, COALESCE(username, ''), COALESCE(phone_number, ''), password_hash, role, wallet_address,
+		SELECT id, email, COALESCE(username, ''), COALESCE(phone_number, ''), password_hash, role,
 		       is_verified, is_active, COALESCE(cooperative_agreement, false),
 		       COALESCE(member_status, 'calon_anggota_pendana'), COALESCE(balance_idr, 0),
 		       COALESCE(email_verified, false), created_at, updated_at
@@ -101,7 +100,6 @@ func (r *UserRepository) FindByEmail(email string) (*models.User, error) {
 		&phoneNumber,
 		&user.PasswordHash,
 		&user.Role,
-		&user.WalletAddress,
 		&user.IsVerified,
 		&user.IsActive,
 		&user.CooperativeAgreement,
@@ -129,7 +127,7 @@ func (r *UserRepository) FindByEmail(email string) (*models.User, error) {
 func (r *UserRepository) FindByUsername(username string) (*models.User, error) {
 	user := &models.User{}
 	query := `
-		SELECT id, email, COALESCE(username, ''), COALESCE(phone_number, ''), password_hash, role, wallet_address,
+		SELECT id, email, COALESCE(username, ''), COALESCE(phone_number, ''), password_hash, role,
 		       is_verified, is_active, COALESCE(cooperative_agreement, false),
 		       COALESCE(member_status, 'calon_anggota_pendana'), COALESCE(balance_idr, 0),
 		       COALESCE(email_verified, false), created_at, updated_at
@@ -144,7 +142,6 @@ func (r *UserRepository) FindByUsername(username string) (*models.User, error) {
 		&phoneNumber,
 		&user.PasswordHash,
 		&user.Role,
-		&user.WalletAddress,
 		&user.IsVerified,
 		&user.IsActive,
 		&user.CooperativeAgreement,
@@ -185,7 +182,7 @@ func (r *UserRepository) FindByEmailOrUsername(identifier string) (*models.User,
 func (r *UserRepository) FindByID(id uuid.UUID) (*models.User, error) {
 	user := &models.User{}
 	query := `
-		SELECT id, email, COALESCE(username, ''), COALESCE(phone_number, ''), password_hash, role, wallet_address,
+		SELECT id, email, COALESCE(username, ''), COALESCE(phone_number, ''), password_hash, role,
 		       is_verified, is_active, COALESCE(cooperative_agreement, false),
 		       COALESCE(member_status, 'calon_anggota_pendana'), COALESCE(balance_idr, 0),
 		       COALESCE(email_verified, false), created_at, updated_at
@@ -200,7 +197,6 @@ func (r *UserRepository) FindByID(id uuid.UUID) (*models.User, error) {
 		&phoneNumber,
 		&user.PasswordHash,
 		&user.Role,
-		&user.WalletAddress,
 		&user.IsVerified,
 		&user.IsActive,
 		&user.CooperativeAgreement,
@@ -279,12 +275,6 @@ func (r *UserRepository) UpdateProfile(userID uuid.UUID, req *models.UpdateProfi
 	return err
 }
 
-func (r *UserRepository) UpdateWallet(userID uuid.UUID, walletAddress string) error {
-	query := `UPDATE users SET wallet_address = $1, updated_at = $2 WHERE id = $3`
-	_, err := r.db.Exec(query, walletAddress, time.Now(), userID)
-	return err
-}
-
 func (r *UserRepository) SetVerified(userID uuid.UUID, verified bool) error {
 	query := `UPDATE users SET is_verified = $1, updated_at = $2 WHERE id = $3`
 	_, err := r.db.Exec(query, verified, time.Now(), userID)
@@ -295,13 +285,6 @@ func (r *UserRepository) EmailExists(email string) (bool, error) {
 	var exists bool
 	query := `SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`
 	err := r.db.QueryRow(query, email).Scan(&exists)
-	return exists, err
-}
-
-func (r *UserRepository) WalletExists(wallet string) (bool, error) {
-	var exists bool
-	query := `SELECT EXISTS(SELECT 1 FROM users WHERE wallet_address = $1)`
-	err := r.db.QueryRow(query, wallet).Scan(&exists)
 	return exists, err
 }
 
@@ -333,5 +316,169 @@ func (r *UserRepository) UpdateMemberStatus(userID uuid.UUID, status models.Memb
 func (r *UserRepository) UpdateRole(userID uuid.UUID, role models.UserRole) error {
 	query := `UPDATE users SET role = $1, updated_at = $2 WHERE id = $3`
 	_, err := r.db.Exec(query, role, time.Now(), userID)
+	return err
+}
+
+// ==================== Identity/KYC Methods ====================
+
+func (r *UserRepository) CreateIdentity(identity *models.UserIdentity) error {
+	identity.ID = uuid.New()
+	now := time.Now()
+	identity.CreatedAt = now
+	identity.UpdatedAt = now
+	if identity.IsVerified {
+		identity.VerifiedAt = &now
+	}
+
+	query := `
+		INSERT INTO user_identities (id, user_id, nik, full_name, ktp_photo_url, selfie_url, is_verified, verified_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`
+	_, err := r.db.Exec(query,
+		identity.ID, identity.UserID, identity.NIK, identity.FullName,
+		identity.KTPPhotoURL, identity.SelfieURL, identity.IsVerified,
+		identity.VerifiedAt, identity.CreatedAt, identity.UpdatedAt,
+	)
+	return err
+}
+
+func (r *UserRepository) FindIdentityByUserID(userID uuid.UUID) (*models.UserIdentity, error) {
+	identity := &models.UserIdentity{}
+	query := `
+		SELECT id, user_id, nik, full_name, ktp_photo_url, selfie_url, is_verified, verified_at, created_at, updated_at
+		FROM user_identities
+		WHERE user_id = $1
+	`
+	err := r.db.QueryRow(query, userID).Scan(
+		&identity.ID, &identity.UserID, &identity.NIK, &identity.FullName,
+		&identity.KTPPhotoURL, &identity.SelfieURL, &identity.IsVerified,
+		&identity.VerifiedAt, &identity.CreatedAt, &identity.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return identity, nil
+}
+
+func (r *UserRepository) UpdateIdentity(identity *models.UserIdentity) error {
+	identity.UpdatedAt = time.Now()
+	query := `
+		UPDATE user_identities
+		SET nik = $1, full_name = $2, ktp_photo_url = $3, selfie_url = $4, is_verified = $5, verified_at = $6, updated_at = $7
+		WHERE id = $8
+	`
+	_, err := r.db.Exec(query,
+		identity.NIK, identity.FullName, identity.KTPPhotoURL, identity.SelfieURL,
+		identity.IsVerified, identity.VerifiedAt, identity.UpdatedAt, identity.ID,
+	)
+	return err
+}
+
+// ==================== Bank Account Methods ====================
+
+func (r *UserRepository) CreateBankAccount(account *models.BankAccount) error {
+	account.ID = uuid.New()
+	now := time.Now()
+	account.CreatedAt = now
+	account.UpdatedAt = now
+	if account.IsVerified {
+		account.VerifiedAt = &now
+	}
+
+	query := `
+		INSERT INTO bank_accounts (id, user_id, bank_code, bank_name, account_number, account_name, is_verified, is_primary, verified_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`
+	_, err := r.db.Exec(query,
+		account.ID, account.UserID, account.BankCode, account.BankName,
+		account.AccountNumber, account.AccountName, account.IsVerified,
+		account.IsPrimary, account.VerifiedAt, account.CreatedAt, account.UpdatedAt,
+	)
+	return err
+}
+
+func (r *UserRepository) FindBankAccountsByUserID(userID uuid.UUID) ([]models.BankAccount, error) {
+	query := `
+		SELECT id, user_id, bank_code, bank_name, account_number, account_name, is_verified, is_primary, verified_at, created_at, updated_at
+		FROM bank_accounts
+		WHERE user_id = $1
+		ORDER BY is_primary DESC, created_at DESC
+	`
+	rows, err := r.db.Query(query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var accounts []models.BankAccount
+	for rows.Next() {
+		var account models.BankAccount
+		if err := rows.Scan(
+			&account.ID, &account.UserID, &account.BankCode, &account.BankName,
+			&account.AccountNumber, &account.AccountName, &account.IsVerified,
+			&account.IsPrimary, &account.VerifiedAt, &account.CreatedAt, &account.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, account)
+	}
+	return accounts, nil
+}
+
+func (r *UserRepository) FindPrimaryBankAccount(userID uuid.UUID) (*models.BankAccount, error) {
+	account := &models.BankAccount{}
+	query := `
+		SELECT id, user_id, bank_code, bank_name, account_number, account_name, is_verified, is_primary, verified_at, created_at, updated_at
+		FROM bank_accounts
+		WHERE user_id = $1 AND is_primary = true
+		LIMIT 1
+	`
+	err := r.db.QueryRow(query, userID).Scan(
+		&account.ID, &account.UserID, &account.BankCode, &account.BankName,
+		&account.AccountNumber, &account.AccountName, &account.IsVerified,
+		&account.IsPrimary, &account.VerifiedAt, &account.CreatedAt, &account.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return account, nil
+}
+
+func (r *UserRepository) UpdateBankAccount(account *models.BankAccount) error {
+	account.UpdatedAt = time.Now()
+	query := `
+		UPDATE bank_accounts
+		SET bank_code = $1, bank_name = $2, account_number = $3, account_name = $4, is_verified = $5, updated_at = $6
+		WHERE id = $7
+	`
+	_, err := r.db.Exec(query,
+		account.BankCode, account.BankName, account.AccountNumber, account.AccountName,
+		account.IsVerified, account.UpdatedAt, account.ID,
+	)
+	return err
+}
+
+func (r *UserRepository) SetPrimaryBankAccount(userID, accountID uuid.UUID) error {
+	// First, unset all primary flags
+	_, err := r.db.Exec(`UPDATE bank_accounts SET is_primary = false, updated_at = $1 WHERE user_id = $2`, time.Now(), userID)
+	if err != nil {
+		return err
+	}
+	// Set the new primary
+	_, err = r.db.Exec(`UPDATE bank_accounts SET is_primary = true, updated_at = $1 WHERE id = $2`, time.Now(), accountID)
+	return err
+}
+
+// ==================== Password Methods ====================
+
+func (r *UserRepository) UpdatePassword(userID uuid.UUID, hashedPassword string) error {
+	query := `UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3`
+	_, err := r.db.Exec(query, hashedPassword, time.Now(), userID)
 	return err
 }
