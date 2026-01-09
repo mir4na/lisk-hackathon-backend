@@ -62,12 +62,8 @@ type RegisterRequest struct {
 	Password             string   `json:"password" binding:"required,min=8"`
 	ConfirmPassword      string   `json:"confirm_password" binding:"required,eqfield=Password"`
 	Role                 UserRole `json:"role" binding:"required,oneof=exporter investor"`
-	FullName             string   `json:"full_name" binding:"required"`
-	PhoneNumber          string   `json:"phone_number" binding:"required"`
 	CooperativeAgreement bool     `json:"cooperative_agreement" binding:"required"`
 	OTPToken             string   `json:"otp_token" binding:"required"` // Token from OTP verification
-	CompanyName          *string  `json:"company_name,omitempty"`
-	Country              *string  `json:"country,omitempty"`
 }
 
 type LoginRequest struct {

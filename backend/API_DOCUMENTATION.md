@@ -4,6 +4,8 @@ Base URL: `http://localhost:8080`
 
 ## Important Notes
 
+> ⚠️ **Profile Completion Required**: After registration, users MUST complete their profile (full_name) before accessing most features. Use `PUT /api/v1/user/profile` to complete profile.
+
 > ⚠️ **Wallet Requirement**: Users (both eksportir and investor) MUST connect their wallet before creating invoices or investing. Use `PUT /api/v1/user/wallet` to connect wallet.
 
 > 💰 **Account Balance**: Each user has an account balance (balance_idr) visible via `GET /api/v1/user/balance` or in profile response.
@@ -77,6 +79,8 @@ curl -X POST http://localhost:8080/api/v1/auth/verify-otp \
 
 ### 3. Register User
 
+> 📝 **Note**: Registration only requires email, username, password, role, and cooperative agreement. Profile details (full_name, phone) must be completed separately via `PUT /user/profile` before accessing other features.
+
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/register \
   -H "Content-Type: application/json" \
@@ -86,8 +90,6 @@ curl -X POST http://localhost:8080/api/v1/auth/register \
     "password": "password123",
     "confirm_password": "password123",
     "role": "investor",
-    "full_name": "John Doe",
-    "phone_number": "081234567890",
     "cooperative_agreement": true,
     "otp_token": "<token_from_verify_otp>"
   }'
@@ -237,19 +239,7 @@ Document types: `nib`, `akta_pendirian`, `ktp_direktur`
 
 ## Buyers (Importir)
 
-### Create Buyer
-
-```bash
-curl -X POST http://localhost:8080/api/v1/buyers \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "company_name": "German Import GmbH",
-    "country": "Germany",
-    "contact_email": "buyer@german-import.de",
-    "contact_phone": "+49123456789"
-  }'
-```
+> ⚠️ **Note**: Buyer creation is not available through API. Buyers (importers) do not use this application - they receive payment links via email.
 
 ### List Buyers
 

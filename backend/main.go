@@ -87,6 +87,9 @@ func main() {
 	// Initialize wallet middleware
 	walletMiddleware := middleware.NewWalletMiddleware(userRepo)
 
+	// Initialize profile middleware
+	profileMiddleware := middleware.NewProfileMiddleware(userRepo)
+
 	// Initialize Gin router
 	router := gin.Default()
 
@@ -132,46 +135,52 @@ func main() {
 		protected := v1.Group("")
 		protected.Use(middleware.AuthMiddleware(jwtManager))
 		{
-			// User routes
+			// User routes (no profile completion required for profile endpoints)
 			user := protected.Group("/user")
 			{
+				// Profile endpoints - don't require profile completion (allow user to complete profile)
 				user.GET("/profile", userHandler.GetProfile)
 				user.PUT("/profile", userHandler.UpdateProfile)
-				user.PUT("/wallet", userHandler.UpdateWallet)
-				user.POST("/kyc", userHandler.SubmitKYC)
-				user.GET("/kyc", userHandler.GetKYCStatus)
-				user.GET("/balance", paymentHandler.GetBalance)
 
-				// MITRA application routes
-				mitra := user.Group("/mitra")
+				// These require profile completion
+				userWithProfile := user.Group("")
+				userWithProfile.Use(profileMiddleware.RequireProfileComplete())
 				{
-					mitra.POST("/apply", mitraHandler.Apply)
-					mitra.GET("/status", mitraHandler.GetStatus)
-					mitra.POST("/documents", mitraHandler.UploadDocument)
+					userWithProfile.PUT("/wallet", userHandler.UpdateWallet)
+					userWithProfile.POST("/kyc", userHandler.SubmitKYC)
+					userWithProfile.GET("/kyc", userHandler.GetKYCStatus)
+					userWithProfile.GET("/balance", paymentHandler.GetBalance)
+
+					// MITRA application routes
+					mitra := userWithProfile.Group("/mitra")
+					{
+						mitra.POST("/apply", mitraHandler.Apply)
+						mitra.GET("/status", mitraHandler.GetStatus)
+						mitra.POST("/documents", mitraHandler.UploadDocument)
+					}
 				}
 			}
 
-			// Payment routes (PROTOTYPE)
+			// Payment routes (PROTOTYPE) - require profile completion
 			payments := protected.Group("/payments")
+			payments.Use(profileMiddleware.RequireProfileComplete())
 			{
 				payments.POST("/deposit", paymentHandler.Deposit)
 				payments.POST("/withdraw", paymentHandler.Withdraw)
 				payments.GET("/balance", paymentHandler.GetBalance)
 			}
 
-			// Buyer routes (exporter only)
+			// Buyer routes (exporter only, read-only - buyer creation removed as buyers don't use the app)
 			buyers := protected.Group("/buyers")
-			buyers.Use(middleware.ExporterOnly())
+			buyers.Use(middleware.ExporterOnly(), profileMiddleware.RequireProfileComplete())
 			{
-				buyers.POST("", buyerHandler.Create)
 				buyers.GET("", buyerHandler.List)
 				buyers.GET("/:id", buyerHandler.Get)
-				buyers.PUT("/:id", buyerHandler.Update)
-				buyers.DELETE("/:id", buyerHandler.Delete)
 			}
 
-			// Invoice routes (exporter only for CRUD)
+			// Invoice routes (exporter only for CRUD) - require profile completion
 			invoices := protected.Group("/invoices")
+			invoices.Use(profileMiddleware.RequireProfileComplete())
 			{
 				// Exporter routes - require wallet for blockchain operations
 				invoices.POST("", middleware.ExporterOnly(), walletMiddleware.RequireWallet(), invoiceHandler.Create)
@@ -187,47 +196,49 @@ func main() {
 				invoices.POST("/:id/pool", middleware.AdminOnly(), fundingHandler.CreatePool)
 			}
 
-			// Funding/Investment routes (Marketplace)
+			// Funding/Investment routes (Marketplace) - require profile completion
 			pools := protected.Group("/pools")
+			pools.Use(profileMiddleware.RequireProfileComplete())
 			{
 				pools.GET("", fundingHandler.ListPools)
 				pools.GET("/:id", fundingHandler.GetPool)
 			}
 
-			// Marketplace routes (with filters)
+			// Marketplace routes (with filters) - require profile completion
 			marketplace := protected.Group("/marketplace")
+			marketplace.Use(profileMiddleware.RequireProfileComplete())
 			{
 				marketplace.GET("", fundingHandler.GetMarketplace)
 			}
 
-			// Risk Questionnaire routes (for investors)
+			// Risk Questionnaire routes (for investors) - require profile completion
 			riskQuestionnaire := protected.Group("/risk-questionnaire")
-			riskQuestionnaire.Use(middleware.InvestorOnly())
+			riskQuestionnaire.Use(middleware.InvestorOnly(), profileMiddleware.RequireProfileComplete())
 			{
 				riskQuestionnaire.GET("/questions", rqHandler.GetQuestions)
 				riskQuestionnaire.POST("", rqHandler.Submit)
 				riskQuestionnaire.GET("/status", rqHandler.GetStatus)
 			}
 
-			// Investment routes - require wallet for blockchain transparency
+			// Investment routes - require wallet and profile completion
 			investments := protected.Group("/investments")
-			investments.Use(middleware.InvestorOnly(), walletMiddleware.RequireWallet())
+			investments.Use(middleware.InvestorOnly(), profileMiddleware.RequireProfileComplete(), walletMiddleware.RequireWallet())
 			{
 				investments.POST("", fundingHandler.Invest)
 				investments.GET("", fundingHandler.GetMyInvestments)
 				investments.GET("/portfolio", fundingHandler.GetPortfolio)
 			}
 
-			// Exporter routes
+			// Exporter routes - require profile completion
 			exporter := protected.Group("/exporter")
-			exporter.Use(middleware.ExporterOnly())
+			exporter.Use(middleware.ExporterOnly(), profileMiddleware.RequireProfileComplete())
 			{
 				exporter.POST("/disbursement", fundingHandler.ExporterDisbursement)
 			}
 
-			// Mitra Dashboard
+			// Mitra Dashboard - require profile completion
 			mitraDashboard := protected.Group("/mitra")
-			mitraDashboard.Use(middleware.ExporterOnly())
+			mitraDashboard.Use(middleware.ExporterOnly(), profileMiddleware.RequireProfileComplete())
 			{
 				mitraDashboard.GET("/dashboard", fundingHandler.GetMitraDashboard)
 			}

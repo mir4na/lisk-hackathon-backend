@@ -57,13 +57,11 @@ func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginRespon
 		return nil, err
 	}
 
-	// Create user with VESSEL fields
+	// Create user without profile (profile will be completed later)
 	username := req.Username
-	phoneNumber := req.PhoneNumber
 	user := &models.User{
 		Email:                req.Email,
 		Username:             &username,
-		PhoneNumber:          &phoneNumber,
 		PasswordHash:         hashedPassword,
 		Role:                 req.Role,
 		IsVerified:           false,
@@ -74,14 +72,8 @@ func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginRespon
 		EmailVerified:        true, // Already verified via OTP
 	}
 
-	profile := &models.UserProfile{
-		FullName:    req.FullName,
-		Phone:       &phoneNumber,
-		CompanyName: req.CompanyName,
-		Country:     req.Country,
-	}
-
-	if err := s.userRepo.Create(user, profile); err != nil {
+	// Create user without profile - profile will be created during profile completion
+	if err := s.userRepo.Create(user, nil); err != nil {
 		return nil, err
 	}
 
@@ -95,8 +87,6 @@ func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginRespon
 	if err != nil {
 		return nil, err
 	}
-
-	user.Profile = profile
 
 	return &models.LoginResponse{
 		User:         user,
