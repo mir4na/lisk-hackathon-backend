@@ -491,6 +491,25 @@ func RunMigrations(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_virtual_accounts_pool ON virtual_accounts(pool_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_virtual_accounts_user ON virtual_accounts(user_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_virtual_accounts_status ON virtual_accounts(status);`,
+
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_completed BOOLEAN DEFAULT false;`,
+
+		`INSERT INTO users (
+			email, username, password_hash, role, is_verified, is_active,
+			cooperative_agreement, member_status, balance_idr, email_verified, profile_completed
+		) VALUES (
+			'admin@vessel.com',
+			'admin',
+			'$2a$10$4wj900d29YA0zv8R9PiBlOxvo5pJ94S90JsiY1PqX0IrW10NfKNIW',
+			'admin',
+			true,
+			true,
+			true,
+			'admin',
+			0,
+			true,
+			true
+		) ON CONFLICT (email) DO NOTHING;`,
 	}
 
 	for i, migration := range migrations {

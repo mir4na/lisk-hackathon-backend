@@ -24,6 +24,7 @@ module.exports = {
       url: process.env.LISK_SEPOLIA_RPC_URL || "https://rpc.sepolia-api.lisk.com",
       chainId: 4202,
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      gasPrice: 5000000000, // 5 gwei
     },
   },
   etherscan: {

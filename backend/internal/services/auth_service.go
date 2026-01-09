@@ -24,7 +24,7 @@ func NewAuthService(userRepo repository.UserRepositoryInterface, jwtManager *uti
 
 func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginResponse, error) {
 	// Validate OTP token first
-	if s.otpService != nil && !s.otpService.ValidateOTPToken(req.OTPToken) {
+	if s.otpService != nil && !s.otpService.ValidateOTPToken(req.OTPToken, req.Email) {
 		return nil, errors.New("email not verified, please verify OTP first")
 	}
 

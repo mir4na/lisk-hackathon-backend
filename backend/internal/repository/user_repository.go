@@ -26,8 +26,8 @@ func (r *UserRepository) Create(user *models.User, profile *models.UserProfile) 
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO users (email, username, phone_number, password_hash, role, is_verified, is_active, cooperative_agreement, member_status, balance_idr, email_verified)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO users (email, username, phone_number, password_hash, role, is_verified, is_active, cooperative_agreement, member_status, balance_idr, email_verified, profile_completed)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, created_at, updated_at
 	`
 	err = tx.QueryRow(
@@ -43,9 +43,19 @@ func (r *UserRepository) Create(user *models.User, profile *models.UserProfile) 
 		user.MemberStatus,
 		user.BalanceIDR,
 		user.EmailVerified,
+		user.ProfileCompleted,
 	).Scan(&user.ID, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return err
+	}
+
+	// Handle nil profile (initialize default)
+	if profile == nil {
+		profile = &models.UserProfile{
+			FullName: "",
+			// Other fields are pointers (*string), so they default to nil
+			// which is correct for database NULL
+		}
 	}
 
 	profileQuery := `
@@ -122,6 +132,14 @@ func (r *UserRepository) CompleteUserRegistration(userID uuid.UUID, profile *mod
 	identityQuery := `
 		INSERT INTO user_identities (id, user_id, nik, full_name, ktp_photo_url, selfie_url, is_verified, verified_at, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (user_id) DO UPDATE SET
+			nik = EXCLUDED.nik,
+			full_name = EXCLUDED.full_name,
+			ktp_photo_url = EXCLUDED.ktp_photo_url,
+			selfie_url = EXCLUDED.selfie_url,
+			updated_at = EXCLUDED.updated_at,
+			is_verified = EXCLUDED.is_verified,
+			verified_at = EXCLUDED.verified_at
 	`
 	_, err = tx.Exec(identityQuery,
 		identity.ID, userID, identity.NIK, identity.FullName,
@@ -158,7 +176,7 @@ func (r *UserRepository) CompleteUserRegistration(userID uuid.UUID, profile *mod
 	// 4. Mark user as verified (if auto-verify logic applies, or just rely on KYC status)
 	// For MVP: Set IsVerified = true if KYC is verified
 	if identity.IsVerified {
-		userUpdateQuery := `UPDATE users SET is_verified = true, updated_at = $1 WHERE id = $2`
+		userUpdateQuery := `UPDATE users SET is_verified = true, profile_completed = true, updated_at = $1 WHERE id = $2`
 		_, err = tx.Exec(userUpdateQuery, time.Now(), userID)
 		if err != nil {
 			return fmt.Errorf("failed to update user verification: %w", err)
@@ -174,7 +192,7 @@ func (r *UserRepository) FindByEmail(email string) (*models.User, error) {
 		SELECT id, email, COALESCE(username, ''), COALESCE(phone_number, ''), password_hash, role,
 		       is_verified, is_active, COALESCE(cooperative_agreement, false),
 		       COALESCE(member_status, 'calon_anggota_pendana'), COALESCE(balance_idr, 0),
-		       COALESCE(email_verified, false), created_at, updated_at
+		       COALESCE(email_verified, false), COALESCE(profile_completed, false), created_at, updated_at
 		FROM users
 		WHERE email = $1 AND is_active = true
 	`
@@ -192,6 +210,7 @@ func (r *UserRepository) FindByEmail(email string) (*models.User, error) {
 		&user.MemberStatus,
 		&user.BalanceIDR,
 		&user.EmailVerified,
+		&user.ProfileCompleted,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -216,7 +235,7 @@ func (r *UserRepository) FindByUsername(username string) (*models.User, error) {
 		SELECT id, email, COALESCE(username, ''), COALESCE(phone_number, ''), password_hash, role,
 		       is_verified, is_active, COALESCE(cooperative_agreement, false),
 		       COALESCE(member_status, 'calon_anggota_pendana'), COALESCE(balance_idr, 0),
-		       COALESCE(email_verified, false), created_at, updated_at
+		       COALESCE(email_verified, false), COALESCE(profile_completed, false), created_at, updated_at
 		FROM users
 		WHERE username = $1 AND is_active = true
 	`
@@ -234,6 +253,7 @@ func (r *UserRepository) FindByUsername(username string) (*models.User, error) {
 		&user.MemberStatus,
 		&user.BalanceIDR,
 		&user.EmailVerified,
+		&user.ProfileCompleted,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -271,7 +291,7 @@ func (r *UserRepository) FindByID(id uuid.UUID) (*models.User, error) {
 		SELECT id, email, COALESCE(username, ''), COALESCE(phone_number, ''), password_hash, role,
 		       is_verified, is_active, COALESCE(cooperative_agreement, false),
 		       COALESCE(member_status, 'calon_anggota_pendana'), COALESCE(balance_idr, 0),
-		       COALESCE(email_verified, false), created_at, updated_at
+		       COALESCE(email_verified, false), COALESCE(profile_completed, false), created_at, updated_at
 		FROM users
 		WHERE id = $1
 	`
@@ -289,6 +309,7 @@ func (r *UserRepository) FindByID(id uuid.UUID) (*models.User, error) {
 		&user.MemberStatus,
 		&user.BalanceIDR,
 		&user.EmailVerified,
+		&user.ProfileCompleted,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)

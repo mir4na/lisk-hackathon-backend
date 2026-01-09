@@ -11,14 +11,15 @@ import (
 	"github.com/vessel/backend/internal/config"
 	"github.com/vessel/backend/internal/models"
 	"github.com/vessel/backend/internal/repository"
+	"github.com/vessel/backend/internal/utils"
 )
 
 var (
-	ErrOTPRateLimit    = errors.New("too many OTP requests, please wait before trying again")
-	ErrOTPNotFound     = errors.New("OTP not found or expired")
-	ErrOTPInvalid      = errors.New("invalid OTP code")
-	ErrOTPMaxAttempts  = errors.New("maximum verification attempts exceeded")
-	ErrOTPExpired      = errors.New("OTP has expired")
+	ErrOTPRateLimit     = errors.New("too many OTP requests, please wait before trying again")
+	ErrOTPNotFound      = errors.New("OTP not found or expired")
+	ErrOTPInvalid       = errors.New("invalid OTP code")
+	ErrOTPMaxAttempts   = errors.New("maximum verification attempts exceeded")
+	ErrOTPExpired       = errors.New("OTP has expired")
 	ErrEmailNotVerified = errors.New("email not verified")
 )
 
@@ -26,19 +27,21 @@ type OTPService struct {
 	otpRepo      *repository.OTPRepository
 	emailService *EmailService
 	config       *config.Config
+	jwtManager   *utils.JWTManager
 }
 
-func NewOTPService(otpRepo *repository.OTPRepository, emailService *EmailService, cfg *config.Config) *OTPService {
+func NewOTPService(otpRepo *repository.OTPRepository, emailService *EmailService, cfg *config.Config, jwtManager *utils.JWTManager) *OTPService {
 	return &OTPService{
 		otpRepo:      otpRepo,
 		emailService: emailService,
 		config:       cfg,
+		jwtManager:   jwtManager,
 	}
 }
 
 // GenerateAndSendOTP generates a new OTP and sends it via email
 func (s *OTPService) GenerateAndSendOTP(email string, purpose models.OTPPurpose) (*models.SendOTPResponse, error) {
-	// Check rate limit (max 3 OTPs per hour)
+	// Check rate limit (max 3 OTPs per 2 minutes)
 	count, err := s.otpRepo.CountRecentOTPs(email, purpose)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check rate limit: %w", err)
@@ -57,6 +60,9 @@ func (s *OTPService) GenerateAndSendOTP(email string, purpose models.OTPPurpose)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate OTP: %w", err)
 	}
+
+	// [DEBUG] Log OTP for hackathon/testing
+	fmt.Printf("[OTP] Generated Code for %s: %s\n", email, code)
 
 	// Create OTP record
 	expiresAt := time.Now().Add(time.Duration(s.config.OTPExpiryMinutes) * time.Minute)
@@ -123,8 +129,8 @@ func (s *OTPService) VerifyOTP(email, code string) (*models.VerifyOTPResponse, e
 		return nil, fmt.Errorf("failed to mark OTP as verified: %w", err)
 	}
 
-	// Generate verification token (used for registration)
-	token, err := generateVerificationToken()
+	// Generate verification token (signed JWT)
+	token, err := s.jwtManager.GenerateVerificationToken(email)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate verification token: %w", err)
 	}
@@ -137,11 +143,24 @@ func (s *OTPService) VerifyOTP(email, code string) (*models.VerifyOTPResponse, e
 }
 
 // ValidateOTPToken validates the OTP verification token
-// For hackathon MVP, we just check if the token is non-empty
-// In production, this should be a JWT or stored token
-func (s *OTPService) ValidateOTPToken(token string) bool {
-	// For hackathon MVP, just check if token exists and is not empty
-	return len(token) > 20
+// It checks if the token is valid and belongs to the specified email
+func (s *OTPService) ValidateOTPToken(token string, email string) bool {
+	claims, err := s.jwtManager.ValidateToken(token)
+	if err != nil {
+		return false
+	}
+
+	// Ensure the token was issued for this specific email
+	if claims.Email != email {
+		return false
+	}
+
+	// Ensure it is a verification token
+	if claims.Issuer != "vessel-verify" {
+		return false
+	}
+
+	return true
 }
 
 // generateOTPCode generates a 6-digit random OTP code

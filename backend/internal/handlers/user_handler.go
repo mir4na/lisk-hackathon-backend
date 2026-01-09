@@ -1,22 +1,27 @@
 package handlers
 
 import (
+	"io"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/vessel/backend/internal/models"
 	"github.com/vessel/backend/internal/repository"
+	"github.com/vessel/backend/internal/services"
 	"github.com/vessel/backend/internal/utils"
 )
 
 type UserHandler struct {
-	userRepo *repository.UserRepository
-	kycRepo  *repository.KYCRepository
+	userRepo      *repository.UserRepository
+	kycRepo       *repository.KYCRepository
+	pinataService *services.PinataService
 }
 
-func NewUserHandler(userRepo *repository.UserRepository, kycRepo *repository.KYCRepository) *UserHandler {
+func NewUserHandler(userRepo *repository.UserRepository, kycRepo *repository.KYCRepository, pinataService *services.PinataService) *UserHandler {
 	return &UserHandler{
-		userRepo: userRepo,
-		kycRepo:  kycRepo,
+		userRepo:      userRepo,
+		kycRepo:       kycRepo,
+		pinataService: pinataService,
 	}
 }
 
@@ -207,7 +212,7 @@ func (h *UserHandler) CompleteProfile(c *gin.Context) {
 		return
 	}
 
-	c.JSON(200, gin.H{
+	utils.SuccessResponse(c, gin.H{
 		"message": "Profile completed successfully. You can now access all features.",
 	})
 }
@@ -369,6 +374,14 @@ func (h *UserHandler) GetPersonalData(c *gin.Context) {
 
 	if user.Username != nil {
 		response.Username = *user.Username
+	}
+
+	// Populate Phone from user.Profile if available, or identity
+	// Note: Phone is usually in UserProfile
+	if user.Profile != nil && user.Profile.Phone != nil {
+		response.Phone = *user.Profile.Phone
+	} else if user.PhoneNumber != nil {
+		response.Phone = *user.PhoneNumber
 	}
 
 	if identity != nil {
@@ -593,5 +606,73 @@ func (h *UserHandler) UpdateWallet(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"message":        "Wallet address updated successfully",
 		"wallet_address": req.WalletAddress,
+	})
+}
+
+// UploadDocument godoc
+// @Summary Upload user document (KTP/Selfie)
+// @Description Upload a document (KTP or Selfie) to IPFS via Pinata
+// @Tags User
+// @Security BearerAuth
+// @Accept multipart/form-data
+// @Produce json
+// @Param document_type formData string true "Document type (ktp, selfie)"
+// @Param file formData file true "Document file"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} models.APIError
+// @Router /user/documents [post]
+func (h *UserHandler) UploadDocument(c *gin.Context) {
+	_, exists := c.Get("user_id")
+	if !exists {
+		utils.UnauthorizedError(c, "user not authenticated")
+		return
+	}
+
+	// Get document type
+	docType := c.PostForm("document_type")
+	if docType != "ktp" && docType != "selfie" {
+		utils.BadRequestError(c, "invalid document type. allowed: ktp, selfie")
+		return
+	}
+
+	// Get file
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		utils.BadRequestError(c, "file not found")
+		return
+	}
+	defer file.Close()
+
+	// Read file data
+	fileData, err := io.ReadAll(file)
+	if err != nil {
+		utils.BadRequestError(c, "failed to read file")
+		return
+	}
+
+	// Validate file size (max 5MB for photos)
+	if len(fileData) > 5*1024*1024 {
+		utils.BadRequestError(c, "file size exceeds 5MB")
+		return
+	}
+
+	// Upload to Pinata
+	metadata := map[string]string{
+		"type": docType,
+	}
+	_, ipfsHash, err := h.pinataService.UploadFile(fileData, header.Filename, metadata)
+	if err != nil {
+		utils.InternalServerError(c, "failed to upload to IPFS: "+err.Error())
+		return
+	}
+
+	// Construct URL (using gateway)
+	url := h.pinataService.GetIPFSURL(ipfsHash)
+
+	utils.SuccessResponse(c, gin.H{
+		"message":       "document uploaded successfully",
+		"document_type": docType,
+		"url":           url,
+		"hash":          ipfsHash,
 	})
 }

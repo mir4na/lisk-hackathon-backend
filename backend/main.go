@@ -68,7 +68,7 @@ func main() {
 
 	emailService := services.NewEmailService(cfg)
 	escrowService := services.NewEscrowService()
-	otpService := services.NewOTPService(otpRepo, emailService, cfg)
+	otpService := services.NewOTPService(otpRepo, emailService, cfg, jwtManager)
 	authService := services.NewAuthService(userRepo, jwtManager, otpService)
 	mitraService := services.NewMitraService(mitraRepo, userRepo, emailService, pinataService)
 	invoiceService := services.NewInvoiceService(invoiceRepo, fundingRepo, pinataService, cfg)
@@ -81,7 +81,7 @@ func main() {
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, otpService)
-	userHandler := handlers.NewUserHandler(userRepo, kycRepo)
+	userHandler := handlers.NewUserHandler(userRepo, kycRepo, pinataService)
 	// buyerHandler removed
 	invoiceHandler := handlers.NewInvoiceHandler(invoiceService, blockchainService)
 	fundingHandler := handlers.NewFundingHandler(fundingService)
@@ -147,6 +147,8 @@ func main() {
 				user.PUT("/profile", userHandler.UpdateProfile)
 				user.POST("/kyc", userHandler.SubmitKYC)
 				user.GET("/kyc", userHandler.GetKYCStatus)
+				user.POST("/complete-profile", userHandler.CompleteProfile)
+				user.POST("/documents", userHandler.UploadDocument) // New route for generic docs (KTP/Selfie)
 				user.GET("/balance", paymentHandler.GetBalance)
 
 				// Profile Management (Flow: MANAGEMENT PROFIL USER)

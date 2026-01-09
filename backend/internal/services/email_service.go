@@ -344,6 +344,7 @@ func (s *EmailService) getOTPEmailBody(code, purpose string) (string, error) {
 
 func (s *EmailService) sendEmail(to, subject, body string) error {
 	// For hackathon MVP, if SMTP is not configured, just log and return
+	fmt.Printf("[DEBUG] SMTP Config - Host: %s, Port: %d, User LEN: %d\n", s.config.SMTPHost, s.config.SMTPPort, len(s.config.SMTPUsername))
 	if s.config.SMTPUsername == "" || s.config.SMTPPassword == "" {
 		fmt.Printf("[EMAIL] Would send to: %s\nSubject: %s\n", to, subject)
 		return nil

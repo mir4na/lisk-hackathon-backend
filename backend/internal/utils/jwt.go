@@ -61,6 +61,20 @@ func (m *JWTManager) GenerateRefreshToken(userID uuid.UUID, email, role string) 
 	return token.SignedString([]byte(m.secretKey))
 }
 
+// GenerateVerificationToken generates a short-lived token for email verification
+func (m *JWTManager) GenerateVerificationToken(email string) (string, error) {
+	claims := &JWTClaims{
+		Email: email,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)), // 15 min expiry
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "vessel-verify",
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(m.secretKey))
+}
+
 func (m *JWTManager) ValidateToken(tokenString string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {

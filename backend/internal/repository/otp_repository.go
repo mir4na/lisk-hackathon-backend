@@ -87,16 +87,19 @@ func (r *OTPRepository) MarkVerified(id uuid.UUID) error {
 	return err
 }
 
-// CountRecentOTPs counts OTPs sent to an email in the last hour
+// CountRecentOTPs counts OTPs sent to an email in the last window
 func (r *OTPRepository) CountRecentOTPs(email string, purpose models.OTPPurpose) (int, error) {
+	// Use app-side time calculation to avoid timezone mismatch between App (Host) and DB (Docker)
+	cutoff := time.Now().Add(-2 * time.Minute)
+
 	query := `
 		SELECT COUNT(*)
 		FROM otp_codes
-		WHERE email = $1 AND purpose = $2 AND created_at > NOW() - INTERVAL '1 hour'
+		WHERE email = $1 AND purpose = $2 AND created_at > $3
 	`
 
 	var count int
-	err := r.db.QueryRow(query, email, purpose).Scan(&count)
+	err := r.db.QueryRow(query, email, purpose, cutoff).Scan(&count)
 	return count, err
 }
 

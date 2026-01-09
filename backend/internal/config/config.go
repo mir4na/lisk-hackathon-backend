@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -78,7 +80,35 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
-	godotenv.Load()
+	wd, _ := os.Getwd()
+	fmt.Printf("[CONFIG] Starting up... Current Working Directory: %s\n", wd)
+
+	// Try loading .env from current directory first
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Printf("[CONFIG] Note: .env not found in %s (Error: %v), checking other locations...\n", wd, err)
+
+		// Try backend/.env (if running from root)
+		if err := godotenv.Load("backend/.env"); err != nil {
+			// Try parent directory
+			if err := godotenv.Load("../.env"); err != nil {
+				fmt.Printf("[CONFIG] Warning: Could not load .env from current, backend/, or parent directory\n")
+			} else {
+				fmt.Println("[CONFIG] Loaded .env from parent directory (../.env)")
+			}
+		} else {
+			fmt.Println("[CONFIG] Loaded .env from backend/.env")
+		}
+	} else {
+		fmt.Println("[CONFIG] Loaded .env from current directory")
+	}
+
+	// Verify critical config
+	smtpUser := os.Getenv("SMTP_USERNAME")
+	fmt.Printf("[CONFIG] Debug: SMTP_USERNAME='%s' (Len: %d)\n", smtpUser, len(smtpUser))
+	if smtpUser == "" {
+		fmt.Println("[CONFIG] CRITICAL WARNING: SMTP_USERNAME is empty! Email sending will fail.")
+	}
 
 	jwtExpiry, _ := strconv.Atoi(getEnv("JWT_EXPIRY_HOURS", "24"))
 	jwtRefreshExpiry, _ := strconv.Atoi(getEnv("JWT_REFRESH_EXPIRY_HOURS", "168"))
@@ -99,23 +129,23 @@ func Load() (*Config, error) {
 		GinMode: getEnv("GIN_MODE", "debug"),
 
 		DatabaseURL:  getEnv("DATABASE_URL", ""),
-		PostgresHost: getEnv("POSTGRES_HOST", "localhost"),
-		PostgresPort: getEnv("POSTGRES_PORT", "5432"),
-		PostgresUser: getEnv("POSTGRES_USER", "vessel"),
-		PostgresPass: getEnv("POSTGRES_PASSWORD", "vessel"),
-		PostgresDB:   getEnv("POSTGRES_DB", "vessel"),
+		PostgresHost: getEnv("POSTGRES_HOST", ""),
+		PostgresPort: getEnv("POSTGRES_PORT", ""),
+		PostgresUser: getEnv("POSTGRES_USER", ""),
+		PostgresPass: getEnv("POSTGRES_PASSWORD", ""),
+		PostgresDB:   getEnv("POSTGRES_DB", ""),
 
-		RedisHost:     getEnv("REDIS_HOST", "localhost"),
-		RedisPort:     getEnv("REDIS_PORT", "6379"),
+		RedisHost:     getEnv("REDIS_HOST", ""),
+		RedisPort:     getEnv("REDIS_PORT", ""),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		RedisDB:       redisDB,
 
-		JWTSecret:             getEnv("JWT_SECRET", "default-secret-change-me"),
+		JWTSecret:             getEnv("JWT_SECRET", ""),
 		JWTExpiryHours:        jwtExpiry,
 		JWTRefreshExpiryHours: jwtRefreshExpiry,
 
 		PrivateKey:              getEnv("PRIVATE_KEY", ""),
-		BlockchainRPCURL:        getEnv("BLOCKCHAIN_RPC_URL", "https://rpc.sepolia-api.lisk.com"),
+		BlockchainRPCURL:        getEnv("BLOCKCHAIN_RPC_URL", ""),
 		ChainID:                 chainID,
 		InvoiceNFTContractAddr:  getEnv("INVOICE_NFT_CONTRACT_ADDRESS", ""),
 		InvoicePoolContractAddr: getEnv("INVOICE_POOL_CONTRACT_ADDRESS", ""),
@@ -123,26 +153,26 @@ func Load() (*Config, error) {
 		PinataAPIKey:     getEnv("PINATA_API_KEY", ""),
 		PinataSecretKey:  getEnv("PINATA_SECRET_KEY", ""),
 		PinataJWT:        getEnv("PINATA_JWT", ""),
-		PinataGatewayURL: getEnv("PINATA_GATEWAY_URL", "https://gateway.pinata.cloud/ipfs/"),
+		PinataGatewayURL: getEnv("PINATA_GATEWAY_URL", ""),
 
 		MaxFileSizeMB:    maxFileSize,
-		AllowedFileTypes: getEnv("ALLOWED_FILE_TYPES", "pdf,png,jpg,jpeg,zip"),
+		AllowedFileTypes: getEnv("ALLOWED_FILE_TYPES", ""),
 
 		PlatformFeePercentage:    platformFee,
 		DefaultAdvancePercentage: defaultAdvance,
 		MinInvoiceAmount:         minInvoice,
 		MaxInvoiceAmount:         maxInvoice,
 
-		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"),
+		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", ""),
 
-		FrontendURL: getEnv("FRONTEND_URL", "http://localhost:3000"),
+		FrontendURL: getEnv("FRONTEND_URL", ""),
 
 		// SMTP Settings for OTP
-		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPHost:     getEnv("SMTP_HOST", ""),
 		SMTPPort:     smtpPort,
 		SMTPUsername: getEnv("SMTP_USERNAME", ""),
-		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
-		SMTPFrom:     getEnv("SMTP_FROM", "noreply@vessel.id"),
+		SMTPPassword: strings.ReplaceAll(getEnv("SMTP_PASSWORD", ""), " ", ""),
+		SMTPFrom:     getEnv("SMTP_FROM", ""),
 
 		// OTP Settings
 		OTPExpiryMinutes: otpExpiry,

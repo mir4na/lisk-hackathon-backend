@@ -34,9 +34,10 @@ type User struct {
 	IsActive             bool         `json:"is_active"`
 	CooperativeAgreement bool         `json:"cooperative_agreement"`
 	MemberStatus         MemberStatus `json:"member_status"`
-	BalanceIDR           float64      `json:"balance_idr"` // For investor: outstanding investments, for mitra: outstanding debt
+	BalanceIDR           float64      `json:"balance_idr"`
 	EmailVerified        bool         `json:"email_verified"`
-	WalletAddress        *string      `json:"wallet_address,omitempty"` // For on-chain transparency (user wallet address)
+	ProfileCompleted     bool         `json:"profile_completed"`
+	WalletAddress        *string      `json:"wallet_address,omitempty"`
 	CreatedAt            time.Time    `json:"created_at"`
 	UpdatedAt            time.Time    `json:"updated_at"`
 	Profile              *UserProfile `json:"profile,omitempty"`
@@ -202,6 +203,7 @@ type ProfileDataResponse struct {
 	FullName     string `json:"full_name"`     // From KTP
 	NIKMasked    string `json:"nik_masked"`    // Masked NIK (e.g., 320101******1234)
 	Email        string `json:"email"`         // Read-only
+	Phone        string `json:"phone"`         // Added Phone
 	Username     string `json:"username"`      // Read-only
 	MemberStatus string `json:"member_status"` // Member status
 	Role         string `json:"role"`          // investor/mitra
