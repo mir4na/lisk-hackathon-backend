@@ -26,8 +26,12 @@ func (r *MitraRepository) Create(app *models.MitraApplication) error {
 	app.Status = models.MitraStatusPending
 
 	query := `
-		INSERT INTO mitra_applications (id, user_id, company_name, company_type, npwp, annual_revenue, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO mitra_applications (
+			id, user_id, company_name, company_type, npwp, annual_revenue, 
+			address, business_description, website_url, year_founded, key_products, export_markets,
+			status, created_at, updated_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 	`
 
 	_, err := r.db.Exec(query,
@@ -37,6 +41,12 @@ func (r *MitraRepository) Create(app *models.MitraApplication) error {
 		app.CompanyType,
 		app.NPWP,
 		app.AnnualRevenue,
+		app.Address,
+		app.BusinessDescription,
+		app.WebsiteURL,
+		app.YearFounded,
+		app.KeyProducts,
+		app.ExportMarkets,
 		app.Status,
 		app.CreatedAt,
 		app.UpdatedAt,
@@ -50,6 +60,7 @@ func (r *MitraRepository) FindByID(id uuid.UUID) (*models.MitraApplication, erro
 	app := &models.MitraApplication{}
 	query := `
 		SELECT id, user_id, company_name, company_type, npwp, annual_revenue,
+		       address, business_description, website_url, year_founded, key_products, export_markets,
 		       nib_document_url, akta_pendirian_url, ktp_direktur_url,
 		       status, rejection_reason, reviewed_by, reviewed_at, created_at, updated_at
 		FROM mitra_applications
@@ -63,6 +74,12 @@ func (r *MitraRepository) FindByID(id uuid.UUID) (*models.MitraApplication, erro
 		&app.CompanyType,
 		&app.NPWP,
 		&app.AnnualRevenue,
+		&app.Address,
+		&app.BusinessDescription,
+		&app.WebsiteURL,
+		&app.YearFounded,
+		&app.KeyProducts,
+		&app.ExportMarkets,
 		&app.NIBDocumentURL,
 		&app.AktaPendirianURL,
 		&app.KTPDirekturURL,
@@ -89,6 +106,7 @@ func (r *MitraRepository) FindByUserID(userID uuid.UUID) (*models.MitraApplicati
 	app := &models.MitraApplication{}
 	query := `
 		SELECT id, user_id, company_name, company_type, npwp, annual_revenue,
+		       address, business_description, website_url, year_founded, key_products, export_markets,
 		       nib_document_url, akta_pendirian_url, ktp_direktur_url,
 		       status, rejection_reason, reviewed_by, reviewed_at, created_at, updated_at
 		FROM mitra_applications
@@ -104,6 +122,12 @@ func (r *MitraRepository) FindByUserID(userID uuid.UUID) (*models.MitraApplicati
 		&app.CompanyType,
 		&app.NPWP,
 		&app.AnnualRevenue,
+		&app.Address,
+		&app.BusinessDescription,
+		&app.WebsiteURL,
+		&app.YearFounded,
+		&app.KeyProducts,
+		&app.ExportMarkets,
 		&app.NIBDocumentURL,
 		&app.AktaPendirianURL,
 		&app.KTPDirekturURL,
@@ -139,6 +163,7 @@ func (r *MitraRepository) FindPending(page, perPage int) ([]models.MitraApplicat
 	// Get applications
 	query := `
 		SELECT id, user_id, company_name, company_type, npwp, annual_revenue,
+		       address, business_description, website_url, year_founded, key_products, export_markets,
 		       nib_document_url, akta_pendirian_url, ktp_direktur_url,
 		       status, rejection_reason, reviewed_by, reviewed_at, created_at, updated_at
 		FROM mitra_applications
@@ -163,6 +188,12 @@ func (r *MitraRepository) FindPending(page, perPage int) ([]models.MitraApplicat
 			&app.CompanyType,
 			&app.NPWP,
 			&app.AnnualRevenue,
+			&app.Address,
+			&app.BusinessDescription,
+			&app.WebsiteURL,
+			&app.YearFounded,
+			&app.KeyProducts,
+			&app.ExportMarkets,
 			&app.NIBDocumentURL,
 			&app.AktaPendirianURL,
 			&app.KTPDirekturURL,

@@ -33,21 +33,27 @@ const (
 )
 
 type MitraApplication struct {
-	ID               uuid.UUID              `json:"id"`
-	UserID           uuid.UUID              `json:"user_id"`
-	CompanyName      string                 `json:"company_name"`
-	CompanyType      CompanyType            `json:"company_type"`
-	NPWP             string                 `json:"npwp"`
-	AnnualRevenue    AnnualRevenue          `json:"annual_revenue"`
-	NIBDocumentURL   *string                `json:"nib_document_url,omitempty"`
-	AktaPendirianURL *string                `json:"akta_pendirian_url,omitempty"`
-	KTPDirekturURL   *string                `json:"ktp_direktur_url,omitempty"`
-	Status           MitraApplicationStatus `json:"status"`
-	RejectionReason  *string                `json:"rejection_reason,omitempty"`
-	ReviewedBy       *uuid.UUID             `json:"reviewed_by,omitempty"`
-	ReviewedAt       *time.Time             `json:"reviewed_at,omitempty"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
+	ID                  uuid.UUID              `json:"id"`
+	UserID              uuid.UUID              `json:"user_id"`
+	CompanyName         string                 `json:"company_name"`
+	CompanyType         CompanyType            `json:"company_type"`
+	NPWP                string                 `json:"npwp"`
+	AnnualRevenue       AnnualRevenue          `json:"annual_revenue"`
+	Address             string                 `json:"address"`
+	BusinessDescription string                 `json:"business_description"`
+	WebsiteURL          string                 `json:"website_url"`
+	YearFounded         int                    `json:"year_founded"`
+	KeyProducts         string                 `json:"key_products"`   // Comma separated
+	ExportMarkets       string                 `json:"export_markets"` // Comma separated
+	NIBDocumentURL      *string                `json:"nib_document_url,omitempty"`
+	AktaPendirianURL    *string                `json:"akta_pendirian_url,omitempty"`
+	KTPDirekturURL      *string                `json:"ktp_direktur_url,omitempty"`
+	Status              MitraApplicationStatus `json:"status"`
+	RejectionReason     *string                `json:"rejection_reason,omitempty"`
+	ReviewedBy          *uuid.UUID             `json:"reviewed_by,omitempty"`
+	ReviewedAt          *time.Time             `json:"reviewed_at,omitempty"`
+	CreatedAt           time.Time              `json:"created_at"`
+	UpdatedAt           time.Time              `json:"updated_at"`
 
 	// Relations
 	User     *User `json:"user,omitempty"`
@@ -56,10 +62,16 @@ type MitraApplication struct {
 
 // SubmitMitraApplicationRequest is the request to apply for MITRA status
 type SubmitMitraApplicationRequest struct {
-	CompanyName   string        `json:"company_name" binding:"required"`
-	CompanyType   CompanyType   `json:"company_type" binding:"required,oneof=PT CV UD"`
-	NPWP          string        `json:"npwp" binding:"required,min=15,max=16"`
-	AnnualRevenue AnnualRevenue `json:"annual_revenue" binding:"required,oneof=<1M 1M-5M 5M-25M 25M-100M >100M"`
+	CompanyName         string        `json:"company_name" binding:"required"`
+	CompanyType         CompanyType   `json:"company_type" binding:"required,oneof=PT CV UD"`
+	NPWP                string        `json:"npwp" binding:"required,min=15,max=16"`
+	AnnualRevenue       AnnualRevenue `json:"annual_revenue" binding:"required,oneof=<1M 1M-5M 5M-25M 25M-100M >100M"`
+	Address             string        `json:"address" binding:"required"`
+	BusinessDescription string        `json:"business_description" binding:"required"`
+	WebsiteURL          string        `json:"website_url"`
+	YearFounded         int           `json:"year_founded" binding:"required,min=1900"`
+	KeyProducts         string        `json:"key_products" binding:"required"`
+	ExportMarkets       string        `json:"export_markets" binding:"required"`
 }
 
 // UploadMitraDocumentRequest is the request for uploading MITRA documents

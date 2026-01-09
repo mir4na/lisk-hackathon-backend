@@ -510,6 +510,14 @@ func RunMigrations(db *sql.DB) error {
 			true,
 			true
 		) ON CONFLICT (email) DO NOTHING;`,
+
+		// Add new columns to mitra_applications
+		`ALTER TABLE mitra_applications ADD COLUMN IF NOT EXISTS address TEXT;`,
+		`ALTER TABLE mitra_applications ADD COLUMN IF NOT EXISTS business_description TEXT;`,
+		`ALTER TABLE mitra_applications ADD COLUMN IF NOT EXISTS website_url VARCHAR(255);`,
+		`ALTER TABLE mitra_applications ADD COLUMN IF NOT EXISTS year_founded INTEGER;`,
+		`ALTER TABLE mitra_applications ADD COLUMN IF NOT EXISTS key_products TEXT;`,
+		`ALTER TABLE mitra_applications ADD COLUMN IF NOT EXISTS export_markets TEXT;`,
 	}
 
 	for i, migration := range migrations {

@@ -79,12 +79,18 @@ func (s *MitraService) Apply(userID uuid.UUID, req *models.SubmitMitraApplicatio
 
 	// Create application
 	app := &models.MitraApplication{
-		UserID:        userID,
-		CompanyName:   req.CompanyName,
-		CompanyType:   req.CompanyType,
-		NPWP:          req.NPWP,
-		AnnualRevenue: req.AnnualRevenue,
-		Status:        models.MitraStatusPending,
+		UserID:              userID,
+		CompanyName:         req.CompanyName,
+		CompanyType:         req.CompanyType,
+		NPWP:                req.NPWP,
+		AnnualRevenue:       req.AnnualRevenue,
+		Address:             req.Address,
+		BusinessDescription: req.BusinessDescription,
+		WebsiteURL:          req.WebsiteURL,
+		YearFounded:         req.YearFounded,
+		KeyProducts:         req.KeyProducts,
+		ExportMarkets:       req.ExportMarkets,
+		Status:              models.MitraStatusPending,
 	}
 
 	if err := s.mitraRepo.Create(app); err != nil {
