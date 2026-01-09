@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -68,7 +69,7 @@ func (r *UserRepository) Create(user *models.User, profile *models.UserProfile) 
 	}
 
 	// Create initial credit score for exporters
-	if user.Role == models.RoleExporter {
+	if user.Role == models.RoleMitra {
 		creditQuery := `
 			INSERT INTO credit_scores (user_id, score)
 			VALUES ($1, 50)
@@ -76,6 +77,91 @@ func (r *UserRepository) Create(user *models.User, profile *models.UserProfile) 
 		_, err = tx.Exec(creditQuery, user.ID)
 		if err != nil {
 			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (r *UserRepository) CompleteUserRegistration(userID uuid.UUID, profile *models.UserProfile, identity *models.UserIdentity, bankAccount *models.BankAccount) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Update Profile
+	profileQuery := `
+		UPDATE user_profiles
+		SET full_name = $1, phone = $2, country = $3, company_name = $4, updated_at = $5
+		WHERE user_id = $6
+		RETURNING id
+	`
+	err = tx.QueryRow(
+		profileQuery,
+		profile.FullName,
+		profile.Phone,
+		profile.Country,
+		profile.CompanyName,
+		time.Now(),
+		userID,
+	).Scan(&profile.ID)
+	if err != nil {
+		return fmt.Errorf("failed to update profile: %w", err)
+	}
+
+	// 2. Create Identity (KYC)
+	identity.ID = uuid.New()
+	now := time.Now()
+	identity.CreatedAt = now
+	identity.UpdatedAt = now
+	if identity.IsVerified {
+		identity.VerifiedAt = &now
+	}
+
+	identityQuery := `
+		INSERT INTO user_identities (id, user_id, nik, full_name, ktp_photo_url, selfie_url, is_verified, verified_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`
+	_, err = tx.Exec(identityQuery,
+		identity.ID, userID, identity.NIK, identity.FullName,
+		identity.KTPPhotoURL, identity.SelfieURL, identity.IsVerified,
+		identity.VerifiedAt, identity.CreatedAt, identity.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create identity: %w", err)
+	}
+
+	// 3. Create Bank Account
+	bankAccount.ID = uuid.New()
+	bankAccount.CreatedAt = now
+	bankAccount.UpdatedAt = now
+	if bankAccount.IsVerified {
+		bankAccount.VerifiedAt = &now
+	}
+	// Ensure it's primary
+	bankAccount.IsPrimary = true
+
+	bankQuery := `
+		INSERT INTO bank_accounts (id, user_id, bank_code, bank_name, account_number, account_name, is_verified, is_primary, verified_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`
+	_, err = tx.Exec(bankQuery,
+		bankAccount.ID, userID, bankAccount.BankCode, bankAccount.BankName,
+		bankAccount.AccountNumber, bankAccount.AccountName, bankAccount.IsVerified,
+		bankAccount.IsPrimary, bankAccount.VerifiedAt, bankAccount.CreatedAt, bankAccount.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create bank account: %w", err)
+	}
+
+	// 4. Mark user as verified (if auto-verify logic applies, or just rely on KYC status)
+	// For MVP: Set IsVerified = true if KYC is verified
+	if identity.IsVerified {
+		userUpdateQuery := `UPDATE users SET is_verified = true, updated_at = $1 WHERE id = $2`
+		_, err = tx.Exec(userUpdateQuery, time.Now(), userID)
+		if err != nil {
+			return fmt.Errorf("failed to update user verification: %w", err)
 		}
 	}
 
@@ -477,8 +563,18 @@ func (r *UserRepository) SetPrimaryBankAccount(userID, accountID uuid.UUID) erro
 
 // ==================== Password Methods ====================
 
+// ==================== Password Methods ====================
+
 func (r *UserRepository) UpdatePassword(userID uuid.UUID, hashedPassword string) error {
 	query := `UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3`
 	_, err := r.db.Exec(query, hashedPassword, time.Now(), userID)
+	return err
+}
+
+// ==================== Wallet Methods ====================
+
+func (r *UserRepository) UpdateWalletAddress(userID uuid.UUID, walletAddress string) error {
+	query := `UPDATE users SET wallet_address = $1, updated_at = $2 WHERE id = $3`
+	_, err := r.db.Exec(query, walletAddress, time.Now(), userID)
 	return err
 }

@@ -207,3 +207,61 @@ func (r *TransactionRepository) UpdateBlockInfo(id uuid.UUID, blockNumber, gasUs
 	_, err := r.db.Exec(query, blockNumber, gasUsed, time.Now(), id)
 	return err
 }
+
+// GetTotalPlatformFees returns the total platform fees collected (for admin dashboard)
+func (r *TransactionRepository) GetTotalPlatformFees() (float64, error) {
+	var total float64
+	query := `SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE type = 'platform_fee' AND status = 'confirmed'`
+	err := r.db.QueryRow(query).Scan(&total)
+	return total, err
+}
+
+// GetPlatformFeeTransactions returns all platform fee transactions (for admin dashboard)
+func (r *TransactionRepository) GetPlatformFeeTransactions(page, perPage int) ([]models.Transaction, int, error) {
+	var total int
+	countQuery := `SELECT COUNT(*) FROM transactions WHERE type = 'platform_fee'`
+	if err := r.db.QueryRow(countQuery).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * perPage
+	query := `
+		SELECT id, invoice_id, user_id, type, amount, currency, tx_hash, status,
+		       from_address, to_address, block_number, gas_used, notes, created_at, updated_at
+		FROM transactions
+		WHERE type = 'platform_fee'
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+	rows, err := r.db.Query(query, perPage, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var txs []models.Transaction
+	for rows.Next() {
+		var tx models.Transaction
+		if err := rows.Scan(
+			&tx.ID,
+			&tx.InvoiceID,
+			&tx.UserID,
+			&tx.Type,
+			&tx.Amount,
+			&tx.Currency,
+			&tx.TxHash,
+			&tx.Status,
+			&tx.FromAddress,
+			&tx.ToAddress,
+			&tx.BlockNumber,
+			&tx.GasUsed,
+			&tx.Notes,
+			&tx.CreatedAt,
+			&tx.UpdatedAt,
+		); err != nil {
+			return nil, 0, err
+		}
+		txs = append(txs, tx)
+	}
+	return txs, total, nil
+}

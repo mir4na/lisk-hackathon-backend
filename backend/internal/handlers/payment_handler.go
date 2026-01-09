@@ -1,18 +1,26 @@
 package handlers
 
 import (
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/vessel/backend/internal/models"
+	"github.com/vessel/backend/internal/repository"
 	"github.com/vessel/backend/internal/services"
 	"github.com/vessel/backend/internal/utils"
 )
 
 type PaymentHandler struct {
 	paymentService *services.PaymentService
+	txRepo         *repository.TransactionRepository
 }
 
-func NewPaymentHandler(paymentService *services.PaymentService) *PaymentHandler {
-	return &PaymentHandler{paymentService: paymentService}
+func NewPaymentHandler(paymentService *services.PaymentService, txRepo *repository.TransactionRepository) *PaymentHandler {
+	return &PaymentHandler{
+		paymentService: paymentService,
+		txRepo:         txRepo,
+	}
 }
 
 // Deposit godoc
@@ -121,4 +129,66 @@ func (h *PaymentHandler) AdminGrantBalance(c *gin.Context) {
 	}
 
 	utils.SuccessResponse(c, response)
+}
+
+// PlatformRevenueResponse represents the platform revenue data for admin dashboard
+type PlatformRevenueResponse struct {
+	TotalRevenue     float64              `json:"total_revenue"`
+	Currency         string               `json:"currency"`
+	FeePercentage    float64              `json:"fee_percentage"`
+	TransactionCount int                  `json:"transaction_count"`
+	Transactions     []models.Transaction `json:"transactions,omitempty"`
+	Page             int                  `json:"page"`
+	PerPage          int                  `json:"per_page"`
+	TotalPages       int                  `json:"total_pages"`
+}
+
+// GetPlatformRevenue godoc
+// @Summary Get total platform revenue (Admin Only)
+// @Description Get total platform fees collected from mitra repayments
+// @Tags Admin
+// @Security BearerAuth
+// @Produce json
+// @Param page query int false "Page number" default(1)
+// @Param per_page query int false "Items per page" default(10)
+// @Success 200 {object} PlatformRevenueResponse
+// @Router /admin/platform/revenue [get]
+func (h *PaymentHandler) GetPlatformRevenue(c *gin.Context) {
+	// Parse pagination
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "10"))
+
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 10
+	}
+
+	// Get total platform fees
+	totalRevenue, err := h.txRepo.GetTotalPlatformFees()
+	if err != nil {
+		utils.InternalServerError(c, "Failed to get platform revenue")
+		return
+	}
+
+	// Get platform fee transactions
+	transactions, total, err := h.txRepo.GetPlatformFeeTransactions(page, perPage)
+	if err != nil {
+		utils.InternalServerError(c, "Failed to get platform fee transactions")
+		return
+	}
+
+	totalPages := (total + perPage - 1) / perPage
+
+	utils.SuccessResponse(c, PlatformRevenueResponse{
+		TotalRevenue:     totalRevenue,
+		Currency:         "IDR",
+		FeePercentage:    2.0, // Platform fee percentage
+		TransactionCount: total,
+		Transactions:     transactions,
+		Page:             page,
+		PerPage:          perPage,
+		TotalPages:       totalPages,
+	})
 }

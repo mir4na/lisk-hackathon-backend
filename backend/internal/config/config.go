@@ -49,8 +49,6 @@ type Config struct {
 	AllowedFileTypes string
 
 	// Logistics API
-	JSONCargoAPIKey string
-	JSONCargoAPIURL string
 
 	// Platform Settings
 	PlatformFeePercentage    float64
@@ -129,9 +127,6 @@ func Load() (*Config, error) {
 
 		MaxFileSizeMB:    maxFileSize,
 		AllowedFileTypes: getEnv("ALLOWED_FILE_TYPES", "pdf,png,jpg,jpeg,zip"),
-
-		JSONCargoAPIKey: getEnv("JSONCARGO_API_KEY", ""),
-		JSONCargoAPIURL: getEnv("JSONCARGO_API_URL", "https://api.jsoncargo.com/v1"),
 
 		PlatformFeePercentage:    platformFee,
 		DefaultAdvancePercentage: defaultAdvance,

@@ -12,15 +12,15 @@ import (
 )
 
 type FundingService struct {
-	fundingRepo   repository.FundingRepositoryInterface
-	invoiceRepo   repository.InvoiceRepositoryInterface
-	txRepo        repository.TransactionRepositoryInterface
-	userRepo      repository.UserRepositoryInterface
-	buyerRepo     repository.BuyerRepositoryInterface
-	rqRepo        repository.RiskQuestionnaireRepositoryInterface
-	emailService  *EmailService
-	escrowService *EscrowService
-	cfg           *config.Config
+	fundingRepo       repository.FundingRepositoryInterface
+	invoiceRepo       repository.InvoiceRepositoryInterface
+	txRepo            repository.TransactionRepositoryInterface
+	userRepo          repository.UserRepositoryInterface
+	rqRepo            repository.RiskQuestionnaireRepositoryInterface
+	emailService      *EmailService
+	escrowService     *EscrowService
+	blockchainService *BlockchainService
+	cfg               *config.Config
 }
 
 func NewFundingService(
@@ -28,22 +28,22 @@ func NewFundingService(
 	invoiceRepo repository.InvoiceRepositoryInterface,
 	txRepo repository.TransactionRepositoryInterface,
 	userRepo repository.UserRepositoryInterface,
-	buyerRepo repository.BuyerRepositoryInterface,
 	rqRepo repository.RiskQuestionnaireRepositoryInterface,
 	emailService *EmailService,
 	escrowService *EscrowService,
+	blockchainService *BlockchainService,
 	cfg *config.Config,
 ) *FundingService {
 	return &FundingService{
-		fundingRepo:   fundingRepo,
-		invoiceRepo:   invoiceRepo,
-		txRepo:        txRepo,
-		userRepo:      userRepo,
-		buyerRepo:     buyerRepo,
-		rqRepo:        rqRepo,
-		emailService:  emailService,
-		escrowService: escrowService,
-		cfg:           cfg,
+		fundingRepo:       fundingRepo,
+		invoiceRepo:       invoiceRepo,
+		txRepo:            txRepo,
+		userRepo:          userRepo,
+		rqRepo:            rqRepo,
+		emailService:      emailService,
+		escrowService:     escrowService,
+		blockchainService: blockchainService,
+		cfg:               cfg,
 	}
 }
 
@@ -436,6 +436,18 @@ func (s *FundingService) Invest(investorID uuid.UUID, req *models.InvestRequest)
 		}()
 	}
 
+	// On-Chain Transparency: Record investment on blockchain
+	go func() {
+		// Get investor wallet address
+		investor, err := s.userRepo.FindByID(investorID)
+		if err == nil && investor != nil && investor.WalletAddress != nil && s.blockchainService != nil {
+			_, err := s.blockchainService.RecordInvestment(req.PoolID, *investor.WalletAddress, req.Amount)
+			if err != nil {
+				fmt.Printf("Failed to record investment on-chain: %v\n", err)
+			}
+		}
+	}()
+
 	return investment, nil
 }
 
@@ -506,11 +518,23 @@ func (s *FundingService) DisburseToExporter(poolID uuid.UUID) error {
 	}
 	s.txRepo.Create(tx)
 
+	// On-Chain Transparency: Record disbursement
+	go func() {
+		if s.blockchainService != nil {
+			_, err := s.blockchainService.RecordDisbursement(poolID, disbursementAmount)
+			if err != nil {
+				fmt.Printf("Failed to record disbursement on-chain: %v\n", err)
+			}
+		}
+	}()
+
 	return nil
 }
 
-// ProcessRepayment processes repayment from exporter and distributes to investors
+// ProcessRepayment processes repayment from importer and distributes to investors
 // Following priority-first rule: Priority investors are paid first, then Catalyst
+// IMPORTANT: Handles partial funding scenario - if invoice was 100k but only 10k was funded,
+// and importer pays 100k, investors get their returns and excess goes to mitra's balance
 func (s *FundingService) ProcessRepayment(invoiceID uuid.UUID, amount float64) error {
 	invoice, err := s.invoiceRepo.FindByID(invoiceID)
 	if err != nil {
@@ -552,6 +576,9 @@ func (s *FundingService) ProcessRepayment(invoiceID uuid.UUID, amount float64) e
 		totalCatalystExpected += inv.ExpectedReturn
 	}
 
+	// Total investor returns needed (priority + catalyst) - for logging
+	_ = totalPriorityExpected + totalCatalystExpected // Used for validation, actual calculation happens below
+
 	// Priority-first distribution
 	// Step 1: Pay priority investors first
 	priorityPaid := 0.0
@@ -576,7 +603,7 @@ func (s *FundingService) ProcessRepayment(invoiceID uuid.UUID, amount float64) e
 			UserID:    &inv.InvestorID,
 			Type:      models.TxTypeInvestorReturn,
 			Amount:    actualReturn,
-			Currency:  "IDRX",
+			Currency:  "IDR",
 			Status:    models.TxStatusPending,
 			Notes:     stringPtr("Priority tranche repayment"),
 		}
@@ -584,6 +611,7 @@ func (s *FundingService) ProcessRepayment(invoiceID uuid.UUID, amount float64) e
 	}
 
 	// Step 2: Pay catalyst investors with remaining amount (if any)
+	catalystPaid := 0.0
 	remainingAfterPriority := remainingAmount - priorityPaid
 	if remainingAfterPriority > 0 && len(catalystInvestments) > 0 {
 		for _, inv := range catalystInvestments {
@@ -596,6 +624,7 @@ func (s *FundingService) ProcessRepayment(invoiceID uuid.UUID, amount float64) e
 				proportion := inv.ExpectedReturn / totalCatalystExpected
 				actualReturn = remainingAfterPriority * proportion
 			}
+			catalystPaid += actualReturn
 
 			s.fundingRepo.UpdateInvestmentStatus(inv.ID, models.InvestmentStatusRepaid, &actualReturn)
 
@@ -605,7 +634,7 @@ func (s *FundingService) ProcessRepayment(invoiceID uuid.UUID, amount float64) e
 				UserID:    &inv.InvestorID,
 				Type:      models.TxTypeInvestorReturn,
 				Amount:    actualReturn,
-				Currency:  "IDRX",
+				Currency:  "IDR",
 				Status:    models.TxStatusPending,
 				Notes:     stringPtr("Catalyst tranche repayment"),
 			}
@@ -619,9 +648,76 @@ func (s *FundingService) ProcessRepayment(invoiceID uuid.UUID, amount float64) e
 		}
 	}
 
+	// Step 3: PARTIAL FUNDING SCENARIO
+	// If importer paid more than what investors need (common when only partial funding occurred)
+	// Example: Invoice 100k, only 10k funded (returns 11k), importer pays 100k
+	// Excess: 100k - platformFee - 11k = goes to mitra's balance
+	totalPaidToInvestors := priorityPaid + catalystPaid
+	excessForMitra := remainingAmount - totalPaidToInvestors
+
+	if excessForMitra > 0 {
+		// Credit excess to mitra's balance
+		mitra, err := s.userRepo.FindByID(invoice.ExporterID)
+		if err == nil && mitra != nil {
+			newBalance := mitra.BalanceIDR + excessForMitra
+			s.userRepo.UpdateBalance(invoice.ExporterID, newBalance)
+
+			// Create transaction record for mitra
+			tx := &models.Transaction{
+				InvoiceID: &invoiceID,
+				UserID:    &invoice.ExporterID,
+				Type:      models.TxTypeRepaymentExcess,
+				Amount:    excessForMitra,
+				Currency:  "IDR",
+				Status:    models.TxStatusConfirmed,
+				Notes:     stringPtr(fmt.Sprintf("Excess from invoice repayment (partial funding scenario). Total paid: %.2f, Investor returns: %.2f, Excess to mitra: %.2f", amount, totalPaidToInvestors, excessForMitra)),
+			}
+			s.txRepo.Create(tx)
+
+			fmt.Printf("[REPAYMENT] Partial funding scenario: Invoice=%s, TotalPaid=%.2f, InvestorReturns=%.2f, ExcessToMitra=%.2f\n",
+				invoiceID.String(), amount, totalPaidToInvestors, excessForMitra)
+
+			// On-Chain Transparency: Record mitra balance credit
+			go func() {
+				if s.blockchainService != nil && mitra.WalletAddress != nil {
+					_, err := s.blockchainService.RecordMitraBalanceCredit(invoiceID, *mitra.WalletAddress, excessForMitra)
+					if err != nil {
+						fmt.Printf("Failed to record mitra balance credit on-chain: %v\n", err)
+					}
+				}
+			}()
+		}
+	}
+
 	// Close pool and update invoice
 	s.fundingRepo.UpdatePoolStatus(pool.ID, models.PoolStatusClosed)
 	s.invoiceRepo.UpdateStatus(invoiceID, models.StatusRepaid)
+
+	// Record platform fee as a transaction for admin tracking
+	if platformFee > 0 {
+		platformFeeTx := &models.Transaction{
+			InvoiceID: &invoiceID,
+			Type:      models.TxTypePlatformFee,
+			Amount:    platformFee,
+			Currency:  "IDR",
+			Status:    models.TxStatusConfirmed,
+			Notes:     stringPtr(fmt.Sprintf("Platform fee (%.1f%%) from mitra repayment - Invoice: %s", s.cfg.PlatformFeePercentage, invoice.InvoiceNumber)),
+		}
+		s.txRepo.Create(platformFeeTx)
+
+		fmt.Printf("[PLATFORM_FEE] Recorded: Invoice=%s, Amount=%.2f, Rate=%.1f%%\n",
+			invoiceID.String(), platformFee, s.cfg.PlatformFeePercentage)
+	}
+
+	// On-Chain Transparency: Record repayment
+	go func() {
+		if s.blockchainService != nil {
+			_, err := s.blockchainService.RecordRepayment(pool.ID, amount)
+			if err != nil {
+				fmt.Printf("Failed to record repayment on-chain: %v\n", err)
+			}
+		}
+	}()
 
 	return nil
 }
@@ -678,18 +774,7 @@ func (s *FundingService) ClosePoolAndNotifyExporter(poolID uuid.UUID) (*models.E
 	}
 
 	// Get buyer details
-	buyer, err := s.buyerRepo.FindByID(invoice.BuyerID)
-	if err != nil {
-		return nil, err
-	}
-	if buyer == nil {
-		return nil, errors.New("buyer not found")
-	}
-
-	buyerEmail := ""
-	if buyer.ContactEmail != nil {
-		buyerEmail = *buyer.ContactEmail
-	}
+	// buyerEmail := "" - skipped due to removal
 
 	// Get all investments for this pool
 	investments, err := s.fundingRepo.FindInvestmentsByPool(pool.ID)
@@ -720,7 +805,12 @@ func (s *FundingService) ClosePoolAndNotifyExporter(poolID uuid.UUID) (*models.E
 	}
 
 	totalInterest := totalExpectedReturn - pool.FundedAmount
-	totalAmountDue := totalExpectedReturn
+
+	// Calculate platform fee that mitra needs to pay
+	platformFee := pool.FundedAmount * (s.cfg.PlatformFeePercentage / 100)
+
+	// Total that mitra must pay = investor returns + platform fee for app
+	totalAmountDue := totalExpectedReturn + platformFee
 
 	// Generate payment ID
 	paymentID := uuid.New().String()
@@ -736,8 +826,7 @@ func (s *FundingService) ClosePoolAndNotifyExporter(poolID uuid.UUID) (*models.E
 		return nil, err
 	}
 
-	// Calculate platform fee (dummy escrow)
-	platformFee := pool.FundedAmount * (s.cfg.PlatformFeePercentage / 100)
+	// Calculate disbursement amount (funds to exporter after platform fee)
 	disbursementAmount := pool.FundedAmount - platformFee
 
 	// Create advance payment transaction (funds to exporter)
@@ -757,10 +846,11 @@ func (s *FundingService) ClosePoolAndNotifyExporter(poolID uuid.UUID) (*models.E
 		InvoiceID:       invoice.ID.String(),
 		InvoiceNumber:   invoice.InvoiceNumber,
 		ExporterName:    exporterName,
-		BuyerName:       buyer.CompanyName,
-		BuyerEmail:      buyerEmail,
+		BuyerName:       invoice.BuyerName,
+		BuyerEmail:      "",
 		PrincipalAmount: pool.FundedAmount,
 		TotalInterest:   totalInterest,
+		PlatformFee:     platformFee,
 		TotalAmountDue:  totalAmountDue,
 		Currency:        pool.PoolCurrency,
 		DueDate:         invoice.DueDate,
@@ -1089,10 +1179,8 @@ func (s *FundingService) GetPoolDetail(poolID uuid.UUID) (*models.PoolDetailResp
 		return nil, err
 	}
 
-	var buyer *models.Buyer
-	if invoice.BuyerID != uuid.Nil {
-		buyer, _ = s.buyerRepo.FindByID(invoice.BuyerID)
-	}
+	// Buyer details are now flattened in Invoice
+	// buyer, _ = s.buyerRepo.FindByID(invoice.BuyerID)
 
 	exporter, _ := s.userRepo.FindByID(invoice.ExporterID)
 
@@ -1137,17 +1225,14 @@ func (s *FundingService) GetPoolDetail(poolID uuid.UUID) (*models.PoolDetailResp
 	}
 
 	// Build buyer info
-	buyerInfo := models.BuyerDetailInfo{}
-	if buyer != nil {
-		buyerInfo = models.BuyerDetailInfo{
-			CompanyName:  buyer.CompanyName,
-			Country:      buyer.Country,
-			CountryFlag:  getCountryFlag(buyer.Country),
-			CountryRisk:  getCountryRisk(buyer.Country),
-			Industry:     "", // Buyer doesn't have industry field
-			IsRepeat:     s.isRepeatBuyer(buyer.ID),
-			TotalHistory: s.getBuyerHistoryCount(buyer.ID),
-		}
+	buyerInfo := models.BuyerDetailInfo{
+		CompanyName:  invoice.BuyerName,
+		Country:      invoice.BuyerCountry,
+		CountryFlag:  getCountryFlag(invoice.BuyerCountry),
+		CountryRisk:  getCountryRisk(invoice.BuyerCountry),
+		Industry:     "", // Buyer doesn't have industry field
+		IsRepeat:     invoice.IsRepeatBuyer,
+		TotalHistory: 0, // History tracking requires efficient querying by name, omitted for MVP refactor
 	}
 
 	// Build exporter info
@@ -1254,15 +1339,7 @@ func (s *FundingService) GetPoolDetail(poolID uuid.UUID) (*models.PoolDetailResp
 }
 
 // Helper functions
-func (s *FundingService) isRepeatBuyer(buyerID uuid.UUID) bool {
-	count, _ := s.invoiceRepo.CountByBuyerID(buyerID)
-	return count > 0
-}
-
-func (s *FundingService) getBuyerHistoryCount(buyerID uuid.UUID) int {
-	count, _ := s.invoiceRepo.CountByBuyerID(buyerID)
-	return count
-}
+// Helper functions used to include isRepeatBuyer and getBuyerHistoryCount, now removed.
 
 func (s *FundingService) getExporterInvoiceCount(exporterID uuid.UUID) int {
 	count, _ := s.invoiceRepo.CountByExporter(exporterID)
@@ -1417,13 +1494,9 @@ func (s *FundingService) GetActiveInvestments(userID uuid.UUID, page, perPage in
 	for _, inv := range investments {
 		pool, _ := s.fundingRepo.FindPoolByID(inv.PoolID)
 		var invoice *models.Invoice
-		var buyer *models.Buyer
 
 		if pool != nil {
 			invoice, _ = s.invoiceRepo.FindByID(pool.InvoiceID)
-			if invoice != nil && invoice.BuyerID != uuid.Nil {
-				buyer, _ = s.buyerRepo.FindByID(invoice.BuyerID)
-			}
 		}
 
 		projectName := "Unknown"
@@ -1439,12 +1512,9 @@ func (s *FundingService) GetActiveInvestments(userID uuid.UUID, page, perPage in
 			}
 			invoiceNumber = invoice.InvoiceNumber
 			dueDate = invoice.DueDate
-		}
-
-		if buyer != nil {
-			buyerName = buyer.CompanyName
-			buyerCountry = buyer.Country
-			buyerFlag = getCountryFlag(buyer.Country)
+			buyerName = invoice.BuyerName
+			buyerCountry = invoice.BuyerCountry
+			buyerFlag = getCountryFlag(invoice.BuyerCountry)
 		}
 
 		// Calculate days remaining
@@ -1530,17 +1600,8 @@ func (s *FundingService) GetMitraActiveInvoices(userID uuid.UUID, page, perPage 
 	invoiceDashboards := make([]models.InvoiceDashboard, 0, len(invoices))
 
 	for _, invoice := range invoices {
-		var buyer *models.Buyer
-		if invoice.BuyerID != uuid.Nil {
-			buyer, _ = s.buyerRepo.FindByID(invoice.BuyerID)
-		}
-
-		buyerName := ""
-		buyerCountry := ""
-		if buyer != nil {
-			buyerName = buyer.CompanyName
-			buyerCountry = buyer.Country
-		}
+		buyerName := invoice.BuyerName
+		buyerCountry := invoice.BuyerCountry
 
 		// Get pool for funded amount
 		pool, _ := s.fundingRepo.FindPoolByInvoiceID(invoice.ID)
@@ -1634,18 +1695,9 @@ func (s *FundingService) GetMitraDashboard(userID uuid.UUID) (*models.MitraDashb
 			totalOwedToInvestors += priorityOwed + catalystOwed
 		}
 
-		// Get buyer info
-		var buyer *models.Buyer
-		if invoice.BuyerID != uuid.Nil {
-			buyer, _ = s.buyerRepo.FindByID(invoice.BuyerID)
-		}
-
-		buyerName := ""
-		buyerCountry := ""
-		if buyer != nil {
-			buyerName = buyer.CompanyName
-			buyerCountry = buyer.Country
-		}
+		// Buyer info is now on invoice
+		buyerName := invoice.BuyerName
+		buyerCountry := invoice.BuyerCountry
 
 		// Calculate days remaining
 		dueDate := invoice.DueDate

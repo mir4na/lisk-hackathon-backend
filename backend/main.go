@@ -45,7 +45,7 @@ func main() {
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(db)
 	kycRepo := repository.NewKYCRepository(db)
-	buyerRepo := repository.NewBuyerRepository(db)
+	// buyerRepo removed
 	invoiceRepo := repository.NewInvoiceRepository(db)
 	fundingRepo := repository.NewFundingRepository(db)
 	txRepo := repository.NewTransactionRepository(db)
@@ -59,30 +59,34 @@ func main() {
 
 	// Initialize services
 	pinataService := services.NewPinataService(cfg)
+
+	// Initialize Blockchain Service first (needed by FundingServiceImpl)
+	blockchainService, err := services.NewBlockchainService(cfg, invoiceRepo, fundingRepo, pinataService)
+	if err != nil {
+		log.Printf("Warning: Blockchain service init failed: %v", err)
+	}
+
 	emailService := services.NewEmailService(cfg)
 	escrowService := services.NewEscrowService()
 	otpService := services.NewOTPService(otpRepo, emailService, cfg)
 	authService := services.NewAuthService(userRepo, jwtManager, otpService)
 	mitraService := services.NewMitraService(mitraRepo, userRepo, emailService, pinataService)
-	invoiceService := services.NewInvoiceService(invoiceRepo, buyerRepo, fundingRepo, pinataService, cfg)
+	invoiceService := services.NewInvoiceService(invoiceRepo, fundingRepo, pinataService, cfg)
 	invoiceService.SetUserRepo(userRepo) // Set user repo for grade suggestion
-	fundingService := services.NewFundingService(fundingRepo, invoiceRepo, txRepo, userRepo, buyerRepo, rqRepo, emailService, escrowService, cfg)
+	// Pass blockchainService to fundingService
+	fundingService := services.NewFundingService(fundingRepo, invoiceRepo, txRepo, userRepo, rqRepo, emailService, escrowService, blockchainService, cfg)
 	paymentService := services.NewPaymentService(userRepo, txRepo, fundingRepo, invoiceRepo) // Updated with fundingRepo and invoiceRepo for Flow 3
 	rqService := services.NewRiskQuestionnaireService(rqRepo)
 	currencyService := services.NewCurrencyService(cfg)
-	blockchainService, err := services.NewBlockchainService(cfg, invoiceRepo, pinataService)
-	if err != nil {
-		log.Printf("Warning: Blockchain service init failed: %v", err)
-	}
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, otpService)
 	userHandler := handlers.NewUserHandler(userRepo, kycRepo)
-	buyerHandler := handlers.NewBuyerHandler(buyerRepo)
+	// buyerHandler removed
 	invoiceHandler := handlers.NewInvoiceHandler(invoiceService, blockchainService)
 	fundingHandler := handlers.NewFundingHandler(fundingService)
 	mitraHandler := handlers.NewMitraHandler(mitraService)
-	paymentHandler := handlers.NewPaymentHandler(paymentService)
+	paymentHandler := handlers.NewPaymentHandler(paymentService, txRepo)
 	importerHandler := handlers.NewImporterHandler(importerPaymentRepo, fundingService, fundingRepo, invoiceRepo)
 	rqHandler := handlers.NewRiskQuestionnaireHandler(rqService)
 	currencyHandler := handlers.NewCurrencyHandler(currencyService)
@@ -135,7 +139,7 @@ func main() {
 		protected := v1.Group("")
 		protected.Use(middleware.AuthMiddleware(jwtManager))
 		{
-			// User routes (no profile completion required for profile endpoints)
+			// User routes (some require profile completion)
 			user := protected.Group("/user")
 			{
 				// Profile endpoints - don't require profile completion (allow user to complete profile)
@@ -151,22 +155,14 @@ func main() {
 				user.PUT("/profile/bank-account", userHandler.ChangeBankAccount) // Ubah Rekening (OTP required)
 				user.PUT("/profile/password", userHandler.ChangePassword)        // Keamanan - Ubah Password
 				user.GET("/profile/banks", userHandler.GetSupportedBanks)        // List supported banks
+				user.PUT("/wallet", userHandler.UpdateWallet)
 
 				// MITRA application routes (Flow 2)
 				mitra := user.Group("/mitra")
 				{
-					userWithProfile.PUT("/wallet", userHandler.UpdateWallet)
-					userWithProfile.POST("/kyc", userHandler.SubmitKYC)
-					userWithProfile.GET("/kyc", userHandler.GetKYCStatus)
-					userWithProfile.GET("/balance", paymentHandler.GetBalance)
-
-					// MITRA application routes
-					mitra := userWithProfile.Group("/mitra")
-					{
-						mitra.POST("/apply", mitraHandler.Apply)
-						mitra.GET("/status", mitraHandler.GetStatus)
-						mitra.POST("/documents", mitraHandler.UploadDocument)
-					}
+					mitra.POST("/apply", mitraHandler.Apply)
+					mitra.GET("/status", mitraHandler.GetStatus)
+					mitra.POST("/documents", mitraHandler.UploadDocument)
 				}
 			}
 
@@ -187,13 +183,7 @@ func main() {
 				payments.GET("/balance", paymentHandler.GetBalance)
 			}
 
-			// Buyer routes (exporter only, read-only - buyer creation removed as buyers don't use the app)
-			buyers := protected.Group("/buyers")
-			buyers.Use(middleware.ExporterOnly(), profileMiddleware.RequireProfileComplete())
-			{
-				buyers.GET("", buyerHandler.List)
-				buyers.GET("/:id", buyerHandler.Get)
-			}
+			// Buyer routes removed (deprecated, information now on Invoice)
 
 			// Invoice routes (exporter/mitra for CRUD)
 			invoices := protected.Group("/invoices")
@@ -302,6 +292,9 @@ func main() {
 
 				// Admin Balance Management (MVP)
 				admin.POST("/balance/grant", paymentHandler.AdminGrantBalance)
+
+				// Admin Platform Revenue Dashboard
+				admin.GET("/platform/revenue", paymentHandler.GetPlatformRevenue)
 			}
 		}
 	}

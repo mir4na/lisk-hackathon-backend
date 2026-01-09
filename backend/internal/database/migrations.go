@@ -55,30 +55,12 @@ func RunMigrations(db *sql.DB) error {
 			updated_at TIMESTAMP DEFAULT NOW()
 		);`,
 
-		// Buyers table
-		`CREATE TABLE IF NOT EXISTS buyers (
-			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-			created_by UUID REFERENCES users(id) ON DELETE CASCADE,
-			company_name VARCHAR(255) NOT NULL,
-			country VARCHAR(100) NOT NULL,
-			address TEXT,
-			contact_email VARCHAR(255),
-			contact_phone VARCHAR(50),
-			website VARCHAR(255),
-			credit_score INTEGER DEFAULT 50,
-			total_invoices INTEGER DEFAULT 0,
-			total_paid DECIMAL(20,2) DEFAULT 0,
-			total_defaulted DECIMAL(20,2) DEFAULT 0,
-			is_verified BOOLEAN DEFAULT false,
-			created_at TIMESTAMP DEFAULT NOW(),
-			updated_at TIMESTAMP DEFAULT NOW()
-		);`,
-
 		// Invoices table
 		`CREATE TABLE IF NOT EXISTS invoices (
 			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 			exporter_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
-			buyer_id UUID REFERENCES buyers(id) NOT NULL,
+			buyer_name VARCHAR(255) NOT NULL,
+			buyer_country VARCHAR(100) NOT NULL,
 			invoice_number VARCHAR(100) NOT NULL,
 			currency VARCHAR(10) DEFAULT 'USD',
 			amount DECIMAL(20,2) NOT NULL,
@@ -171,7 +153,7 @@ func RunMigrations(db *sql.DB) error {
 				'investor_return', 'platform_fee', 'refund'
 			)),
 			amount DECIMAL(20,2) NOT NULL,
-			currency VARCHAR(10) DEFAULT 'USDC',
+			currency VARCHAR(10) DEFAULT 'IDR',
 			tx_hash VARCHAR(66),
 			status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'failed')),
 			from_address VARCHAR(42),
@@ -255,7 +237,6 @@ func RunMigrations(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_users_wallet ON users(wallet_address);`,
 		`CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);`,
 		`CREATE INDEX IF NOT EXISTS idx_invoices_exporter ON invoices(exporter_id);`,
-		`CREATE INDEX IF NOT EXISTS idx_invoices_buyer ON invoices(buyer_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);`,
 		`CREATE INDEX IF NOT EXISTS idx_invoices_due_date ON invoices(due_date);`,
 		`CREATE INDEX IF NOT EXISTS idx_investments_pool ON investments(pool_id);`,
@@ -370,9 +351,6 @@ func RunMigrations(db *sql.DB) error {
 			('ZAF', 'South Africa', 3, '🇿🇦'),
 			('ARG', 'Argentina', 3, '🇦🇷')
 		ON CONFLICT (country_code) DO NOTHING;`,
-
-		// Add buyer tier column
-		`ALTER TABLE buyers ADD COLUMN IF NOT EXISTS country_tier INTEGER DEFAULT 2;`,
 
 		// Add new columns to invoices for VESSEL tranches and grading
 		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS original_currency VARCHAR(10) DEFAULT 'USD';`,

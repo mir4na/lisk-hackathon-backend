@@ -10,14 +10,15 @@ type TransactionType string
 type TransactionStatus string
 
 const (
-	TxTypeInvestment     TransactionType = "investment"
-	TxTypeAdvancePayment TransactionType = "advance_payment"
-	TxTypeBuyerRepayment TransactionType = "buyer_repayment"
-	TxTypeInvestorReturn TransactionType = "investor_return"
-	TxTypePlatformFee    TransactionType = "platform_fee"
-	TxTypeRefund         TransactionType = "refund"
-	TxTypeDeposit        TransactionType = "deposit"
-	TxTypeWithdrawal     TransactionType = "withdrawal"
+	TxTypeInvestment      TransactionType = "investment"
+	TxTypeAdvancePayment  TransactionType = "advance_payment"
+	TxTypeBuyerRepayment  TransactionType = "buyer_repayment"
+	TxTypeInvestorReturn  TransactionType = "investor_return"
+	TxTypePlatformFee     TransactionType = "platform_fee"
+	TxTypeRefund          TransactionType = "refund"
+	TxTypeDeposit         TransactionType = "deposit"
+	TxTypeWithdrawal      TransactionType = "withdrawal"
+	TxTypeRepaymentExcess TransactionType = "repayment_excess" // Excess from partial funding scenario goes to mitra balance
 
 	TxStatusPending   TransactionStatus = "pending"
 	TxStatusConfirmed TransactionStatus = "confirmed"

@@ -9,7 +9,6 @@ import (
 type UserRole string
 
 const (
-	RoleExporter UserRole = "exporter"
 	RoleInvestor UserRole = "investor"
 	RoleAdmin    UserRole = "admin"
 	RoleMitra    UserRole = "mitra"
@@ -37,6 +36,7 @@ type User struct {
 	MemberStatus         MemberStatus `json:"member_status"`
 	BalanceIDR           float64      `json:"balance_idr"` // For investor: outstanding investments, for mitra: outstanding debt
 	EmailVerified        bool         `json:"email_verified"`
+	WalletAddress        *string      `json:"wallet_address,omitempty"` // For on-chain transparency (user wallet address)
 	CreatedAt            time.Time    `json:"created_at"`
 	UpdatedAt            time.Time    `json:"updated_at"`
 	Profile              *UserProfile `json:"profile,omitempty"`
@@ -57,28 +57,35 @@ type UserProfile struct {
 }
 
 type RegisterRequest struct {
-	// Account Credentials
+	// Account Credentials - Only basic fields for registration
 	Email                string   `json:"email" binding:"required,email"`
 	Username             string   `json:"username" binding:"required,min=3,max=50"`
 	Password             string   `json:"password" binding:"required,min=8"`
 	ConfirmPassword      string   `json:"confirm_password" binding:"required,eqfield=Password"`
-	Role                 UserRole `json:"role" binding:"required,oneof=investor mitra"` // Only investor or mitra (guest = unregistered)
-	CooperativeAgreement bool     `json:"cooperative_agreement" binding:"required"`     // Checkbox: "Saya setuju mendaftar menjadi Anggota Koperasi Jasa VESSEL..."
-	OTPToken             string   `json:"otp_token" binding:"required"`                 // Token from OTP verification
+	Role                 UserRole `json:"role" binding:"required,oneof=investor mitra"`
+	CooperativeAgreement bool     `json:"cooperative_agreement" binding:"required"`
+	OTPToken             string   `json:"otp_token" binding:"required"`
+}
 
-	// KYC - Identity Verification
-	NIK         string `json:"nik" binding:"required,len=16"`      // 16-digit NIK
-	FullName    string `json:"full_name" binding:"required,min=3"` // Must match KTP & bank account name
-	KTPPhotoURL string `json:"ktp_photo_url" binding:"required"`   // URL of uploaded KTP photo
-	SelfieURL   string `json:"selfie_url" binding:"required"`      // URL of selfie with KTP
+// CompleteProfileRequest is used to complete user profile after registration
+// User must complete profile before accessing most features
+type CompleteProfileRequest struct {
+	// Required for profile completion
+	FullName string  `json:"full_name" binding:"required,min=3"`
+	Phone    *string `json:"phone,omitempty"`
 
-	// Bank Account for Disbursement
-	BankCode      string `json:"bank_code" binding:"required"`      // Bank code (e.g., "bca", "mandiri", "bni")
-	AccountNumber string `json:"account_number" binding:"required"` // Bank account number
-	AccountName   string `json:"account_name" binding:"required"`   // Account holder name (auto-validated against FullName)
+	// Optional KYC - can be added later
+	NIK         *string `json:"nik,omitempty"`
+	KTPPhotoURL *string `json:"ktp_photo_url,omitempty"`
+	SelfieURL   *string `json:"selfie_url,omitempty"`
 
-	// Optional Fields
-	CompanyName *string `json:"company_name,omitempty"` // Required for mitra
+	// Optional Bank Account - can be added later
+	BankCode      *string `json:"bank_code,omitempty"`
+	AccountNumber *string `json:"account_number,omitempty"`
+	AccountName   *string `json:"account_name,omitempty"`
+
+	// Mitra specific
+	CompanyName *string `json:"company_name,omitempty"`
 	Country     *string `json:"country,omitempty"`
 }
 

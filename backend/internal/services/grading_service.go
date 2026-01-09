@@ -9,13 +9,11 @@ import (
 // GradingService handles invoice grading based on risk matrix
 type GradingService struct {
 	invoiceRepo repository.InvoiceRepositoryInterface
-	buyerRepo   repository.BuyerRepositoryInterface
 }
 
-func NewGradingService(invoiceRepo repository.InvoiceRepositoryInterface, buyerRepo repository.BuyerRepositoryInterface) *GradingService {
+func NewGradingService(invoiceRepo repository.InvoiceRepositoryInterface) *GradingService {
 	return &GradingService{
 		invoiceRepo: invoiceRepo,
-		buyerRepo:   buyerRepo,
 	}
 }
 
@@ -39,13 +37,13 @@ var CountryRiskTier = map[string]int{
 
 // GradeInvoice calculates grade based on risk matrix
 // Returns: grade (A/B/C), score (0-100), country risk (low/medium/high)
-func (s *GradingService) GradeInvoice(invoice *models.Invoice, buyer *models.Buyer, exporterInvoiceCount int, documentCount int) (string, int, string) {
+func (s *GradingService) GradeInvoice(invoice *models.Invoice, exporterInvoiceCount int, documentCount int) (string, int, string) {
 	score := 0
 
 	// 1. Buyer Country Risk (40 points max)
 	countryRisk := "medium"
 	countryTier := 2 // Default to medium risk
-	if tier, ok := CountryRiskTier[buyer.Country]; ok {
+	if tier, ok := CountryRiskTier[invoice.BuyerCountry]; ok {
 		countryTier = tier
 	}
 
@@ -178,13 +176,13 @@ func (s *GradingService) GetExporterInvoiceCount(exporterID uuid.UUID) (int, err
 
 // GradeResult represents the grading result
 type GradeResult struct {
-	Grade             string `json:"grade"`
-	Score             int    `json:"score"`
-	CountryRisk       string `json:"country_risk"`
-	IsInsured         bool   `json:"is_insured"`
-	DocumentScore     int    `json:"document_score"`
-	ExporterHistory   int    `json:"exporter_history"`
-	IsRepeatBuyer     bool   `json:"is_repeat_buyer"`
+	Grade           string `json:"grade"`
+	Score           int    `json:"score"`
+	CountryRisk     string `json:"country_risk"`
+	IsInsured       bool   `json:"is_insured"`
+	DocumentScore   int    `json:"document_score"`
+	ExporterHistory int    `json:"exporter_history"`
+	IsRepeatBuyer   bool   `json:"is_repeat_buyer"`
 }
 
 // FullGrade performs full grading analysis on an invoice
@@ -193,12 +191,6 @@ func (s *GradingService) FullGrade(invoiceID uuid.UUID) (*GradeResult, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	buyer, err := s.buyerRepo.FindByID(invoice.BuyerID)
-	if err != nil {
-		return nil, err
-	}
-
 	documents, err := s.invoiceRepo.FindDocumentsByInvoiceID(invoiceID)
 	if err != nil {
 		return nil, err
@@ -209,7 +201,8 @@ func (s *GradingService) FullGrade(invoiceID uuid.UUID) (*GradeResult, error) {
 		exporterCount = 0
 	}
 
-	grade, score, countryRisk := s.GradeInvoice(invoice, buyer, exporterCount, len(documents))
+	// Calculate scores using grading logic
+	grade, score, countryRisk := s.GradeInvoice(invoice, exporterCount, len(documents))
 	docScore := s.CalculateDocumentScore(documents)
 	isInsured := s.CheckInsurance(documents)
 
@@ -220,6 +213,6 @@ func (s *GradingService) FullGrade(invoiceID uuid.UUID) (*GradeResult, error) {
 		IsInsured:       isInsured,
 		DocumentScore:   docScore,
 		ExporterHistory: exporterCount,
-		IsRepeatBuyer:   buyer.TotalInvoices > 0,
+		IsRepeatBuyer:   invoice.IsRepeatBuyer,
 	}, nil
 }

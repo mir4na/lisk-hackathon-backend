@@ -197,7 +197,11 @@ func (s *EmailService) SendExporterPaymentNotification(email string, data *model
 							<td>%s %.2f</td>
 						</tr>
 						<tr>
-							<td style="padding: 8px 0;"><strong>Total Interest:</strong></td>
+							<td style="padding: 8px 0;"><strong>Total Interest (Investor):</strong></td>
+							<td>%s %.2f</td>
+						</tr>
+						<tr>
+							<td style="padding: 8px 0;"><strong>Platform Fee (2%%):</strong></td>
 							<td>%s %.2f</td>
 						</tr>
 						<tr style="background-color: #dbeafe;">
@@ -255,6 +259,7 @@ func (s *EmailService) SendExporterPaymentNotification(email string, data *model
 		data.InvoiceNumber,
 		data.Currency, data.PrincipalAmount,
 		data.Currency, data.TotalInterest,
+		data.Currency, data.PlatformFee,
 		data.Currency, data.TotalAmountDue,
 		data.DueDate.Format("02 January 2006"),
 		data.PaymentID,

@@ -87,6 +87,11 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
         uint256 amount
     );
     event RepaymentRecorded(uint256 indexed tokenId, uint256 amount);
+    event ExcessRepaymentRecorded(
+        uint256 indexed tokenId,
+        address indexed recipient,
+        uint256 amount
+    );
     event InvestorReturnRecorded(
         uint256 indexed tokenId,
         address indexed investor,
@@ -94,6 +99,19 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
     );
     event PoolClosed(uint256 indexed tokenId);
     event PoolDefaulted(uint256 indexed tokenId);
+
+    // ... (existing code) ...
+
+    /**
+     * @dev Record excess repayment (e.g. to mitra)
+     */
+    function recordExcessRepayment(
+        uint256 tokenId,
+        address recipient,
+        uint256 amount
+    ) external onlyRole(OPERATOR_ROLE) {
+        emit ExcessRepaymentRecorded(tokenId, recipient, amount);
+    }
 
     constructor(address _invoiceNFT, address _platformWallet) {
         invoiceNFT = InvoiceNFT(_invoiceNFT);

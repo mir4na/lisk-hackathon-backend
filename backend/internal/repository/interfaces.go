@@ -36,6 +36,12 @@ type UserRepositoryInterface interface {
 
 	// Password methods
 	UpdatePassword(userID uuid.UUID, hashedPassword string) error
+
+	// Wallet methods
+	UpdateWalletAddress(userID uuid.UUID, walletAddress string) error
+
+	// Complete Registration
+	CompleteUserRegistration(userID uuid.UUID, profile *models.UserProfile, identity *models.UserIdentity, bankAccount *models.BankAccount) error
 }
 
 // KYCRepositoryInterface defines the contract for KYC data operations
@@ -50,19 +56,6 @@ type KYCRepositoryInterface interface {
 	UpdateSelfieURL(kycID uuid.UUID, selfieURL string) error
 }
 
-// BuyerRepositoryInterface defines the contract for buyer data operations
-type BuyerRepositoryInterface interface {
-	Create(buyer *models.Buyer) error
-	FindByID(id uuid.UUID) (*models.Buyer, error)
-	FindByExporter(exporterID uuid.UUID, page, perPage int) ([]models.Buyer, int, error)
-	FindByCompanyName(companyName string, createdBy uuid.UUID) (*models.Buyer, error)
-	Update(buyer *models.Buyer) error
-	Delete(id uuid.UUID) error
-	UpdateCreditScore(id uuid.UUID, score int) error
-	IncrementInvoiceStats(id uuid.UUID, amount float64, isPaid bool) error
-	SetVerified(id uuid.UUID, verified bool) error
-}
-
 // InvoiceRepositoryInterface defines the contract for invoice data operations
 type InvoiceRepositoryInterface interface {
 	Create(invoice *models.Invoice) error
@@ -71,7 +64,7 @@ type InvoiceRepositoryInterface interface {
 	FindFundable(page, perPage int) ([]models.Invoice, int, error)
 	FindAll(filter *models.InvoiceFilter) ([]models.Invoice, int, error)
 	CountByExporter(exporterID uuid.UUID) (int, error)
-	CountByBuyerID(buyerID uuid.UUID) (int, error)
+
 	Update(invoice *models.Invoice) error
 	UpdateStatus(id uuid.UUID, status models.InvoiceStatus) error
 	SetInterestRate(id uuid.UUID, rate float64) error
@@ -140,7 +133,7 @@ type RiskQuestionnaireRepositoryInterface interface {
 // Ensure implementations satisfy interfaces
 var _ UserRepositoryInterface = (*UserRepository)(nil)
 var _ KYCRepositoryInterface = (*KYCRepository)(nil)
-var _ BuyerRepositoryInterface = (*BuyerRepository)(nil)
+
 var _ InvoiceRepositoryInterface = (*InvoiceRepository)(nil)
 var _ FundingRepositoryInterface = (*FundingRepository)(nil)
 var _ TransactionRepositoryInterface = (*TransactionRepository)(nil)

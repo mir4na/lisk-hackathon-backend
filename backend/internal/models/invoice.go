@@ -22,9 +22,12 @@ const (
 )
 
 type Invoice struct {
-	ID                uuid.UUID     `json:"id"`
-	ExporterID        uuid.UUID     `json:"exporter_id"`
-	BuyerID           uuid.UUID     `json:"buyer_id"`
+	ID         uuid.UUID `json:"id"`
+	ExporterID uuid.UUID `json:"exporter_id"`
+	// Buyer Details (Flattened)
+	BuyerName    string `json:"buyer_name"`
+	BuyerCountry string `json:"buyer_country"`
+
 	InvoiceNumber     string        `json:"invoice_number"`
 	Currency          string        `json:"currency"`
 	Amount            float64       `json:"amount"`
@@ -66,7 +69,7 @@ type Invoice struct {
 	PaymentLink         *string `json:"payment_link,omitempty"`
 
 	// Relations
-	Buyer     *Buyer            `json:"buyer,omitempty"`
+
 	Exporter  *User             `json:"exporter,omitempty"`
 	Documents []InvoiceDocument `json:"documents,omitempty"`
 	NFT       *InvoiceNFT       `json:"nft,omitempty"`
@@ -218,7 +221,6 @@ type DocumentValidationStatus struct {
 // InvoiceReviewData contains all data for admin review (Flow 5 - Split Screen)
 type InvoiceReviewData struct {
 	Invoice         Invoice                      `json:"invoice"`
-	Buyer           *Buyer                       `json:"buyer"`
 	Exporter        *UserProfile                 `json:"exporter"`
 	Documents       []DocumentValidationStatus   `json:"documents"`
 	GradeSuggestion AdminGradeSuggestionResponse `json:"grade_suggestion"`

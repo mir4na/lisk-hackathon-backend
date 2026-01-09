@@ -138,6 +138,101 @@ func (h *UserHandler) GetKYCStatus(c *gin.Context) {
 	utils.SuccessResponse(c, kyc)
 }
 
+// CompleteProfile godoc
+// @Summary Complete user profile (KYC & Bank)
+// @Description Complete user profile by providing full name, KYC details, and bank account. Required for full access.
+// @Tags User
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body models.CompleteProfileRequest true "Profile completion details"
+// @Success 200 {object} map[string]string
+// @Router /user/complete-profile [post]
+func (h *UserHandler) CompleteProfile(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req models.CompleteProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestError(c, err.Error())
+		return
+	}
+
+	// 1. Validation Logic
+	if req.NIK == nil || len(*req.NIK) != 16 {
+		utils.BadRequestError(c, "NIK must be exactly 16 digits")
+		return
+	}
+
+	// Validate Bank Account Name (Must match KTP Name - simplified check)
+	if req.AccountName == nil || req.FullName == "" {
+		utils.BadRequestError(c, "Account name and Full Name are required")
+		return
+	}
+
+	// Validate Bank Code
+	if req.BankCode == nil || !h.isSupportedBank(*req.BankCode) {
+		utils.BadRequestError(c, "Bank not supported")
+		return
+	}
+
+	// 2. Prepare Data
+	profile := &models.UserProfile{
+		FullName:    req.FullName,
+		Phone:       req.Phone,
+		Country:     req.Country,
+		CompanyName: req.CompanyName,
+	}
+
+	identity := &models.UserIdentity{
+		NIK:         *req.NIK,
+		FullName:    req.FullName,
+		KTPPhotoURL: *req.KTPPhotoURL,
+		SelfieURL:   *req.SelfieURL,
+		IsVerified:  true, // Auto-verify for MVP
+	}
+
+	bankName := h.getBankName(*req.BankCode)
+	bankAccount := &models.BankAccount{
+		BankCode:      *req.BankCode,
+		BankName:      bankName,
+		AccountNumber: *req.AccountNumber,
+		AccountName:   *req.AccountName,
+		IsVerified:    true, // Auto-verify for MVP
+		IsPrimary:     true,
+	}
+
+	// 3. Execute Transaction
+	if err := h.userRepo.CompleteUserRegistration(userID, profile, identity, bankAccount); err != nil {
+		utils.InternalServerError(c, "Failed to complete profile: "+err.Error())
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"message": "Profile completed successfully. You can now access all features.",
+	})
+}
+
+// Helper methods for bank validation
+func (h *UserHandler) isSupportedBank(code string) bool {
+	banks := models.GetSupportedBanks()
+	for _, b := range banks {
+		if b.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *UserHandler) getBankName(code string) string {
+	banks := models.GetSupportedBanks()
+	for _, b := range banks {
+		if b.Code == code {
+			return b.Name
+		}
+	}
+	return ""
+}
+
 // Admin handlers
 
 // GetPendingKYC godoc
@@ -456,5 +551,47 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 // @Router /user/profile/banks [get]
 func (h *UserHandler) GetSupportedBanks(c *gin.Context) {
 	banks := models.GetSupportedBanks()
-	utils.SuccessResponse(c, banks)
+	c.JSON(200, banks)
+}
+
+// UpdateWallet godoc
+// @Summary Update user wallet address
+// @Description Update the authenticated user's wallet address for blockchain transactions
+// @Tags User
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body map[string]string true "Wallet address"
+// @Success 200 {object} map[string]string
+// @Router /user/wallet [put]
+func (h *UserHandler) UpdateWallet(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req struct {
+		WalletAddress string `json:"wallet_address" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestError(c, err.Error())
+		return
+	}
+
+	// In a real implementation, we would validate the address format
+	if len(req.WalletAddress) < 40 {
+		utils.BadRequestError(c, "Invalid wallet address")
+		return
+	}
+
+	// Update user wallet in repository
+	// Note: We need to add UpdateWallet method to repository interface first
+	// For now, we'll assume it exists or implement it
+	if err := h.userRepo.UpdateWalletAddress(userID, req.WalletAddress); err != nil {
+		utils.InternalServerError(c, "Failed to update wallet address")
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"message":        "Wallet address updated successfully",
+		"wallet_address": req.WalletAddress,
+	})
 }

@@ -19,14 +19,15 @@ func NewInvoiceRepository(db *sql.DB) *InvoiceRepository {
 
 func (r *InvoiceRepository) Create(invoice *models.Invoice) error {
 	query := `
-		INSERT INTO invoices (exporter_id, buyer_id, invoice_number, currency, amount, issue_date, due_date, description, status, advance_percentage)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO invoices (exporter_id, buyer_name, buyer_country, invoice_number, currency, amount, issue_date, due_date, description, status, advance_percentage)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, created_at, updated_at
 	`
 	return r.db.QueryRow(
 		query,
 		invoice.ExporterID,
-		invoice.BuyerID,
+		invoice.BuyerName,
+		invoice.BuyerCountry,
 		invoice.InvoiceNumber,
 		invoice.Currency,
 		invoice.Amount,
@@ -41,19 +42,17 @@ func (r *InvoiceRepository) Create(invoice *models.Invoice) error {
 func (r *InvoiceRepository) FindByID(id uuid.UUID) (*models.Invoice, error) {
 	invoice := &models.Invoice{}
 	query := `
-		SELECT i.id, i.exporter_id, i.buyer_id, i.invoice_number, i.currency, i.amount, i.issue_date, i.due_date,
-		       i.description, i.status, i.interest_rate, i.advance_percentage, i.advance_amount, i.document_hash,
-		       i.created_at, i.updated_at,
-		       b.id, b.company_name, b.country, b.credit_score
-		FROM invoices i
-		LEFT JOIN buyers b ON i.buyer_id = b.id
-		WHERE i.id = $1
+		SELECT id, exporter_id, buyer_name, buyer_country, invoice_number, currency, amount, issue_date, due_date,
+		       description, status, interest_rate, advance_percentage, advance_amount, document_hash,
+		       created_at, updated_at
+		FROM invoices
+		WHERE id = $1
 	`
-	var buyer models.Buyer
 	err := r.db.QueryRow(query, id).Scan(
 		&invoice.ID,
 		&invoice.ExporterID,
-		&invoice.BuyerID,
+		&invoice.BuyerName,
+		&invoice.BuyerCountry,
 		&invoice.InvoiceNumber,
 		&invoice.Currency,
 		&invoice.Amount,
@@ -67,10 +66,6 @@ func (r *InvoiceRepository) FindByID(id uuid.UUID) (*models.Invoice, error) {
 		&invoice.DocumentHash,
 		&invoice.CreatedAt,
 		&invoice.UpdatedAt,
-		&buyer.ID,
-		&buyer.CompanyName,
-		&buyer.Country,
-		&buyer.CreditScore,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -78,7 +73,6 @@ func (r *InvoiceRepository) FindByID(id uuid.UUID) (*models.Invoice, error) {
 		}
 		return nil, err
 	}
-	invoice.Buyer = &buyer
 
 	// Load documents
 	docs, _ := r.FindDocumentsByInvoiceID(id)
@@ -109,19 +103,17 @@ func (r *InvoiceRepository) FindByExporter(exporterID uuid.UUID, filter *models.
 
 	offset := (filter.Page - 1) * filter.PerPage
 	query := `
-		SELECT i.id, i.exporter_id, i.buyer_id, i.invoice_number, i.currency, i.amount, i.issue_date, i.due_date,
-		       i.description, i.status, i.interest_rate, i.advance_percentage, i.advance_amount, i.document_hash,
-		       i.created_at, i.updated_at,
-		       b.id, b.company_name, b.country, b.credit_score
-		FROM invoices i
-		LEFT JOIN buyers b ON i.buyer_id = b.id
-		WHERE i.exporter_id = $1
+		SELECT id, exporter_id, buyer_name, buyer_country, invoice_number, currency, amount, issue_date, due_date,
+		       description, status, interest_rate, advance_percentage, advance_amount, document_hash,
+		       created_at, updated_at
+		FROM invoices
+		WHERE exporter_id = $1
 	`
 	if filter.Status != nil {
-		query += ` AND i.status = $2 ORDER BY i.created_at DESC LIMIT $3 OFFSET $4`
+		query += ` AND status = $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4`
 		args = append(args, filter.PerPage, offset)
 	} else {
-		query += ` ORDER BY i.created_at DESC LIMIT $2 OFFSET $3`
+		query += ` ORDER BY created_at DESC LIMIT $2 OFFSET $3`
 		args = []interface{}{exporterID, filter.PerPage, offset}
 	}
 
@@ -134,11 +126,11 @@ func (r *InvoiceRepository) FindByExporter(exporterID uuid.UUID, filter *models.
 	var invoices []models.Invoice
 	for rows.Next() {
 		var invoice models.Invoice
-		var buyer models.Buyer
 		if err := rows.Scan(
 			&invoice.ID,
 			&invoice.ExporterID,
-			&invoice.BuyerID,
+			&invoice.BuyerName,
+			&invoice.BuyerCountry,
 			&invoice.InvoiceNumber,
 			&invoice.Currency,
 			&invoice.Amount,
@@ -152,14 +144,9 @@ func (r *InvoiceRepository) FindByExporter(exporterID uuid.UUID, filter *models.
 			&invoice.DocumentHash,
 			&invoice.CreatedAt,
 			&invoice.UpdatedAt,
-			&buyer.ID,
-			&buyer.CompanyName,
-			&buyer.Country,
-			&buyer.CreditScore,
 		); err != nil {
 			return nil, 0, err
 		}
-		invoice.Buyer = &buyer
 		invoices = append(invoices, invoice)
 	}
 	return invoices, total, nil
@@ -174,14 +161,12 @@ func (r *InvoiceRepository) FindFundable(page, perPage int) ([]models.Invoice, i
 
 	offset := (page - 1) * perPage
 	query := `
-		SELECT i.id, i.exporter_id, i.buyer_id, i.invoice_number, i.currency, i.amount, i.issue_date, i.due_date,
-		       i.description, i.status, i.interest_rate, i.advance_percentage, i.advance_amount, i.document_hash,
-		       i.created_at, i.updated_at,
-		       b.id, b.company_name, b.country, b.credit_score
-		FROM invoices i
-		LEFT JOIN buyers b ON i.buyer_id = b.id
-		WHERE i.status = 'funding'
-		ORDER BY i.created_at DESC
+		SELECT id, exporter_id, buyer_name, buyer_country, invoice_number, currency, amount, issue_date, due_date,
+		       description, status, interest_rate, advance_percentage, advance_amount, document_hash,
+		       created_at, updated_at
+		FROM invoices
+		WHERE status = 'funding'
+		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
 	`
 	rows, err := r.db.Query(query, perPage, offset)
@@ -193,11 +178,11 @@ func (r *InvoiceRepository) FindFundable(page, perPage int) ([]models.Invoice, i
 	var invoices []models.Invoice
 	for rows.Next() {
 		var invoice models.Invoice
-		var buyer models.Buyer
 		if err := rows.Scan(
 			&invoice.ID,
 			&invoice.ExporterID,
-			&invoice.BuyerID,
+			&invoice.BuyerName,
+			&invoice.BuyerCountry,
 			&invoice.InvoiceNumber,
 			&invoice.Currency,
 			&invoice.Amount,
@@ -211,14 +196,9 @@ func (r *InvoiceRepository) FindFundable(page, perPage int) ([]models.Invoice, i
 			&invoice.DocumentHash,
 			&invoice.CreatedAt,
 			&invoice.UpdatedAt,
-			&buyer.ID,
-			&buyer.CompanyName,
-			&buyer.Country,
-			&buyer.CreditScore,
 		); err != nil {
 			return nil, 0, err
 		}
-		invoice.Buyer = &buyer
 		invoices = append(invoices, invoice)
 	}
 	return invoices, total, nil
@@ -456,12 +436,10 @@ func (r *InvoiceRepository) FindAll(filter *models.InvoiceFilter) ([]models.Invo
 
 	offset := (filter.Page - 1) * filter.PerPage
 	query := `
-		SELECT i.id, i.exporter_id, i.buyer_id, i.invoice_number, i.currency, i.amount, i.issue_date, i.due_date,
-		       i.description, i.status, i.interest_rate, i.advance_percentage, i.advance_amount, i.document_hash,
-		       i.created_at, i.updated_at,
-		       b.id, b.company_name, b.country, b.credit_score
-		FROM invoices i
-		LEFT JOIN buyers b ON i.buyer_id = b.id
+		SELECT id, exporter_id, buyer_name, buyer_country, invoice_number, currency, amount, issue_date, due_date,
+		       description, status, interest_rate, advance_percentage, advance_amount, document_hash,
+		       created_at, updated_at
+		FROM invoices
 		WHERE 1=1
 	`
 
@@ -470,17 +448,17 @@ func (r *InvoiceRepository) FindAll(filter *models.InvoiceFilter) ([]models.Invo
 
 	if filter.Status != nil {
 		queryArgCount++
-		query += ` AND i.status = $` + string(rune('0'+queryArgCount))
+		query += ` AND status = $` + string(rune('0'+queryArgCount))
 		queryArgs = append(queryArgs, *filter.Status)
 	}
 	if filter.ExporterID != nil {
 		queryArgCount++
-		query += ` AND i.exporter_id = $` + string(rune('0'+queryArgCount))
+		query += ` AND exporter_id = $` + string(rune('0'+queryArgCount))
 		queryArgs = append(queryArgs, *filter.ExporterID)
 	}
 
 	queryArgCount++
-	query += ` ORDER BY i.created_at DESC LIMIT $` + string(rune('0'+queryArgCount))
+	query += ` ORDER BY created_at DESC LIMIT $` + string(rune('0'+queryArgCount))
 	queryArgs = append(queryArgs, filter.PerPage)
 
 	queryArgCount++
@@ -496,11 +474,11 @@ func (r *InvoiceRepository) FindAll(filter *models.InvoiceFilter) ([]models.Invo
 	var invoices []models.Invoice
 	for rows.Next() {
 		var invoice models.Invoice
-		var buyer models.Buyer
 		if err := rows.Scan(
 			&invoice.ID,
 			&invoice.ExporterID,
-			&invoice.BuyerID,
+			&invoice.BuyerName,
+			&invoice.BuyerCountry,
 			&invoice.InvoiceNumber,
 			&invoice.Currency,
 			&invoice.Amount,
@@ -514,14 +492,9 @@ func (r *InvoiceRepository) FindAll(filter *models.InvoiceFilter) ([]models.Invo
 			&invoice.DocumentHash,
 			&invoice.CreatedAt,
 			&invoice.UpdatedAt,
-			&buyer.ID,
-			&buyer.CompanyName,
-			&buyer.Country,
-			&buyer.CreditScore,
 		); err != nil {
 			return nil, 0, err
 		}
-		invoice.Buyer = &buyer
 		invoices = append(invoices, invoice)
 	}
 
@@ -533,13 +506,5 @@ func (r *InvoiceRepository) CountByExporter(exporterID uuid.UUID) (int, error) {
 	var count int
 	query := `SELECT COUNT(*) FROM invoices WHERE exporter_id = $1`
 	err := r.db.QueryRow(query, exporterID).Scan(&count)
-	return count, err
-}
-
-// CountByBuyerID counts invoices by buyer
-func (r *InvoiceRepository) CountByBuyerID(buyerID uuid.UUID) (int, error) {
-	var count int
-	query := `SELECT COUNT(*) FROM invoices WHERE buyer_id = $1`
-	err := r.db.QueryRow(query, buyerID).Scan(&count)
 	return count, err
 }

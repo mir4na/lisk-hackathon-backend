@@ -139,16 +139,7 @@ curl -X POST http://localhost:8080/api/v1/auth/register \
     "confirm_password": "password123",
     "role": "investor",
     "cooperative_agreement": true,
-    "otp_token": "<token_from_verify_otp>",
-    
-    "nik": "3201011234567890",
-    "full_name": "John Doe",
-    "ktp_photo_url": "https://storage.example.com/ktp/xxx.jpg",
-    "selfie_url": "https://storage.example.com/selfie/xxx.jpg",
-    
-    "bank_code": "bca",
-    "account_number": "1234567890",
-    "account_name": "John Doe"
+    "otp_token": "<token_from_verify_otp>"
   }'
 ```
 
@@ -162,27 +153,8 @@ curl -X POST http://localhost:8080/api/v1/auth/register \
 | role | string | Yes | One of: `investor`, `mitra` |
 | cooperative_agreement | bool | Yes | Must be `true` |
 | otp_token | string | Yes | Token from verify-otp step |
-| nik | string | Yes | 16-digit NIK |
-| full_name | string | Yes | Full name (must match KTP) |
-| ktp_photo_url | string | Yes | URL of uploaded KTP photo |
-| selfie_url | string | Yes | URL of selfie with KTP |
-| bank_code | string | Yes | Bank code (bca, mandiri, bni, etc.) |
-| account_number | string | Yes | Bank account number |
-| account_name | string | Yes | Account holder name (validated against full_name) |
 
-> 💡 **Microcopy**: "Rekening ini akan menjadi satu-satunya tujuan pencairan dana demi keamanan. Kamu bisa mengubahnya nanti di bagian profile."
-
-**Supported Banks:**
-- `bca` - Bank Central Asia (BCA)
-- `mandiri` - Bank Mandiri
-- `bni` - Bank Negara Indonesia (BNI)
-- `bri` - Bank Rakyat Indonesia (BRI)
-- `cimb` - CIMB Niaga
-- `danamon` - Bank Danamon
-- `permata` - Bank Permata
-- `bsi` - Bank Syariah Indonesia (BSI)
-- `btn` - Bank Tabungan Negara (BTN)
-- `ocbc` - OCBC NISP
+> **Note**: Registration is now simplified. Identity verification (KYC) and Bank Account details are collected in the mandatory **Complete Profile** step.
 
 **Response:**
 ```json
@@ -194,7 +166,7 @@ curl -X POST http://localhost:8080/api/v1/auth/register \
       "email": "user@example.com",
       "username": "testuser",
       "role": "investor",
-      "is_verified": true
+      "is_verified": false
     },
     "access_token": "eyJhbGc...",
     "refresh_token": "eyJhbGc..."
@@ -227,7 +199,49 @@ curl -X POST http://localhost:8080/api/v1/auth/refresh \
 
 ## User Profile
 
-### Get Profile
+### 1. Complete Profile (Mandatory)
+
+After registration/login, user must complete their profile to transact.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/user/complete-profile \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "full_name": "John Doe",
+    "phone": "081234567890",
+    "country": "Indonesia",
+    
+    "nik": "3201011234567890",
+    "ktp_photo_url": "https://storage.example.com/ktp/xxx.jpg",
+    "selfie_url": "https://storage.example.com/selfie/xxx.jpg",
+    
+    "bank_code": "bca",
+    "account_number": "1234567890",
+    "account_name": "John Doe"
+  }'
+```
+
+**Response:**
+```json
+{
+  "message": "Profile completed successfully. You can now access all features."
+}
+```
+
+### 2. Update Wallet (For On-Chain Transparency)
+Connect a crypto wallet (e.g. MetaMask) to associate IDR transactions with on-chain identity.
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/user/wallet \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "wallet_address": "0x123..."
+  }'
+```
+
+### 3. Get Profile
 
 ```bash
 curl -X GET http://localhost:8080/api/v1/user/profile \
@@ -447,25 +461,7 @@ Document types: `nib`, `akta_pendirian`, `ktp_direktur`
 
 ---
 
-## Buyers (Importir)
 
-> ⚠️ **Note**: Buyer creation is not available through API. Buyers (importers) do not use this application - they receive payment links via email.
-
-### List Buyers
-
-```bash
-curl -X GET "http://localhost:8080/api/v1/buyers?page=1&per_page=10" \
-  -H "Authorization: Bearer <access_token>"
-```
-
-### Get Buyer by ID
-
-```bash
-curl -X GET http://localhost:8080/api/v1/buyers/<buyer_id> \
-  -H "Authorization: Bearer <access_token>"
-```
-
----
 
 ## Invoices (Flow 4)
 
@@ -476,7 +472,8 @@ curl -X POST http://localhost:8080/api/v1/invoices \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "buyer_id": "<buyer_uuid>",
+    "buyer_name": "Global Coffee Importers Ltd",
+    "buyer_country": "United States",
     "invoice_number": "INV-2024-001",
     "currency": "USD",
     "amount": 50000.00,
@@ -1256,6 +1253,65 @@ Expected Return = Principal + (Principal × Rate / 100)
 
 ---
 
+## On-Chain Transparency
+
+The following data is recorded on-chain for transparency (Lisk blockchain):
+
+### What's Recorded On-Chain
+
+| Data Type | Smart Contract | Event | Description |
+|-----------|----------------|-------|-------------|
+| Invoice Minting | InvoiceNFT | `InvoiceMinted` | When invoice is tokenized as NFT |
+| Invoice Status | InvoiceNFT | `InvoiceStatusChanged` | Status changes: Active, Funded, Repaid, Defaulted |
+| Pool Creation | InvoicePool | `PoolCreated` | When funding pool is opened |
+| Investment | InvoicePool | `InvestmentRecorded` | Each investor's contribution |
+| Pool Filled | InvoicePool | `PoolFilled` | When pool reaches target |
+| Disbursement | InvoicePool | `DisbursementRecorded` | Funds sent to mitra |
+| Repayment | InvoicePool | `RepaymentRecorded` | Importer payment received |
+| Investor Returns | InvoicePool | `InvestorReturnRecorded` | Returns distributed to each investor |
+| Mitra Credit | InvoicePool | `MitraBalanceCredited` | Excess funds credited to mitra (partial funding) |
+
+### What Remains Off-Chain
+
+- Payment input (amount) - entered manually
+- Bank account details
+- KYC/Identity verification
+- Document storage (files on IPFS, references on-chain)
+
+---
+
+## Partial Funding Scenario
+
+When an invoice is not fully funded but importer pays the full invoice amount:
+
+### Example
+
+| Item | Amount |
+|------|--------|
+| Invoice Amount | Rp 100,000,000 |
+| Funded Amount | Rp 10,000,000 (only 10% funded) |
+| Expected Investor Returns | Rp 11,000,000 (10% + 10% interest) |
+| Importer Pays | Rp 100,000,000 (full invoice) |
+| Platform Fee (2%) | Rp 2,000,000 |
+| **Remaining After Fee** | Rp 98,000,000 |
+| **Investor Returns** | Rp 11,000,000 |
+| **Excess to Mitra Balance** | Rp 87,000,000 |
+
+### Flow
+
+1. Importer pays full invoice amount via payment link
+2. Platform fee is deducted
+3. Investors receive their returns (priority-first)
+4. Excess amount is credited to mitra's balance
+5. All transactions recorded on-chain for transparency
+
+### Transaction Types
+
+- `investor_return` - Returns paid to investors
+- `repayment_excess` - Excess funds credited to mitra balance
+
+---
+
 ## MVP Abstractions
 
 For the MVP phase, the following features are abstracted:
@@ -1276,9 +1332,9 @@ For the MVP phase, the following features are abstracted:
 - Fund flow is tracked in database
 
 ### 4. Blockchain Integration
-- NFT tokenization is optional for MVP
-- Invoice records are stored in PostgreSQL
-- Smart contract interaction is abstracted
+- On-chain transparency is implemented via events
+- Smart contract addresses configured in environment
+- Transaction hashes returned for verification
 
 ---
 

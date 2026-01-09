@@ -76,7 +76,8 @@ type ExporterPaymentNotificationData struct {
 	BuyerEmail      string
 	PrincipalAmount float64 // Original invoice amount funded
 	TotalInterest   float64 // Total interest to be paid by importer
-	TotalAmountDue  float64 // Principal + Total Interest
+	PlatformFee     float64 // Platform fee for the application (2%)
+	TotalAmountDue  float64 // Principal + Total Interest + Platform Fee
 	Currency        string
 	DueDate         time.Time // Invoice due date
 	InvestorDetails []InvestorPaymentDetail
@@ -166,7 +167,8 @@ type MitraRepaymentBreakdown struct {
 	// Total amounts
 	PriorityTotal float64 `json:"priority_total"` // Priority Principal + Interest
 	CatalystTotal float64 `json:"catalyst_total"` // Catalyst Principal + Interest
-	GrandTotal    float64 `json:"grand_total"`    // Total to pay
+	PlatformFee   float64 `json:"platform_fee"`   // Platform fee for the application (2%)
+	GrandTotal    float64 `json:"grand_total"`    // Total to pay (including platform fee)
 
 	Currency string `json:"currency"`
 }

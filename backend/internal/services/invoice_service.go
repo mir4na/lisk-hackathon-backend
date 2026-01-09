@@ -12,7 +12,6 @@ import (
 
 type InvoiceService struct {
 	invoiceRepo repository.InvoiceRepositoryInterface
-	buyerRepo   repository.BuyerRepositoryInterface
 	fundingRepo repository.FundingRepositoryInterface
 	userRepo    repository.UserRepositoryInterface
 	pinata      PinataServiceInterface
@@ -21,14 +20,12 @@ type InvoiceService struct {
 
 func NewInvoiceService(
 	invoiceRepo repository.InvoiceRepositoryInterface,
-	buyerRepo repository.BuyerRepositoryInterface,
 	fundingRepo repository.FundingRepositoryInterface,
 	pinata PinataServiceInterface,
 	cfg *config.Config,
 ) *InvoiceService {
 	return &InvoiceService{
 		invoiceRepo: invoiceRepo,
-		buyerRepo:   buyerRepo,
 		fundingRepo: fundingRepo,
 		pinata:      pinata,
 		cfg:         cfg,
@@ -42,37 +39,14 @@ func (s *InvoiceService) SetUserRepo(userRepo repository.UserRepositoryInterface
 
 // CheckRepeatBuyer checks if buyer is a repeat buyer based on transaction history (Flow 4 Pre-condition)
 func (s *InvoiceService) CheckRepeatBuyer(mitraID uuid.UUID, buyerCompanyName string) (*models.RepeatBuyerCheckResponse, error) {
-	// Find buyer by company name
-	buyer, err := s.buyerRepo.FindByCompanyName(buyerCompanyName, mitraID)
-	if err != nil {
-		return nil, err
-	}
+	// Simplified logic since Buyer table is removed.
+	// In the future, we can query unique buyer names from invoices table with status=repaid
 
-	if buyer == nil {
-		// New buyer - 60% funding limit
-		return &models.RepeatBuyerCheckResponse{
-			IsRepeatBuyer:        false,
-			Message:              "⚠️ Untuk kemitraan baru, maksimal pembiayaan yang dapat dicairkan adalah 60% dari nilai tagihan.",
-			PreviousTransactions: 0,
-			FundingLimit:         60.0,
-		}, nil
-	}
-
-	// Check if buyer has completed transactions
-	if buyer.TotalPaid > 0 {
-		return &models.RepeatBuyerCheckResponse{
-			IsRepeatBuyer:        true,
-			Message:              "✅ Riwayat transaksi terverifikasi. Repeat Order (Verified by System).",
-			PreviousTransactions: buyer.TotalInvoices,
-			FundingLimit:         100.0,
-		}, nil
-	}
-
-	// Buyer exists but no completed transactions
+	// Default to treating as new buyer or relying on manual check for now
 	return &models.RepeatBuyerCheckResponse{
 		IsRepeatBuyer:        false,
 		Message:              "⚠️ Untuk kemitraan baru, maksimal pembiayaan yang dapat dicairkan adalah 60% dari nilai tagihan.",
-		PreviousTransactions: buyer.TotalInvoices,
+		PreviousTransactions: 0,
 		FundingLimit:         60.0,
 	}, nil
 }
@@ -123,31 +97,14 @@ func (s *InvoiceService) CreateFundingRequest(mitraID uuid.UUID, req *models.Cre
 		return nil, errors.New("please upload proof of previous transactions for repeat buyer claim")
 	}
 
-	// Find or create buyer
-	var buyer *models.Buyer
-	existingBuyer, _ := s.buyerRepo.FindByCompanyName(req.BuyerCompanyName, mitraID)
-	if existingBuyer != nil {
-		buyer = existingBuyer
-	} else {
-		// Create new buyer
-		buyer = &models.Buyer{
-			CreatedBy:    mitraID,
-			CompanyName:  req.BuyerCompanyName,
-			Country:      req.BuyerCountry,
-			ContactEmail: &req.BuyerEmail,
-		}
-		if err := s.buyerRepo.Create(buyer); err != nil {
-			return nil, err
-		}
-	}
-
 	// Calculate advance amount based on funding limit
 	advanceAmount := req.IDRAmount * (fundingLimitPercentage / 100)
 
 	// Create invoice
 	invoice := &models.Invoice{
 		ExporterID:        mitraID,
-		BuyerID:           buyer.ID,
+		BuyerName:         req.BuyerCompanyName,
+		BuyerCountry:      req.BuyerCountry,
 		InvoiceNumber:     req.InvoiceNumber,
 		Currency:          "IDR",
 		Amount:            req.IDRAmount,
@@ -183,67 +140,11 @@ func (s *InvoiceService) CreateFundingRequest(mitraID uuid.UUID, req *models.Cre
 		return nil, err
 	}
 
-	invoice.Buyer = buyer
 	return invoice, nil
 }
 
 func (s *InvoiceService) Create(exporterID uuid.UUID, req *models.CreateInvoiceRequest) (*models.Invoice, error) {
-	// Verify buyer exists and belongs to exporter
-	buyer, err := s.buyerRepo.FindByID(req.BuyerID)
-	if err != nil {
-		return nil, err
-	}
-	if buyer == nil {
-		return nil, errors.New("buyer not found")
-	}
-	if buyer.CreatedBy != exporterID {
-		return nil, errors.New("buyer does not belong to you")
-	}
-
-	// Validate amount
-	if req.Amount < s.cfg.MinInvoiceAmount || req.Amount > s.cfg.MaxInvoiceAmount {
-		return nil, errors.New("invoice amount out of allowed range")
-	}
-
-	// Parse dates
-	issueDate, err := time.Parse("2006-01-02", req.IssueDate)
-	if err != nil {
-		return nil, errors.New("invalid issue date format (use YYYY-MM-DD)")
-	}
-
-	dueDate, err := time.Parse("2006-01-02", req.DueDate)
-	if err != nil {
-		return nil, errors.New("invalid due date format (use YYYY-MM-DD)")
-	}
-
-	if dueDate.Before(issueDate) {
-		return nil, errors.New("due date must be after issue date")
-	}
-
-	currency := req.Currency
-	if currency == "" {
-		currency = "USD"
-	}
-
-	invoice := &models.Invoice{
-		ExporterID:        exporterID,
-		BuyerID:           req.BuyerID,
-		InvoiceNumber:     req.InvoiceNumber,
-		Currency:          currency,
-		Amount:            req.Amount,
-		IssueDate:         issueDate,
-		DueDate:           dueDate,
-		Description:       req.Description,
-		Status:            models.StatusDraft,
-		AdvancePercentage: s.cfg.DefaultAdvancePercentage,
-	}
-
-	if err := s.invoiceRepo.Create(invoice); err != nil {
-		return nil, err
-	}
-
-	invoice.Buyer = buyer
-	return invoice, nil
+	return nil, errors.New("legacy create method deprecated, use CreateFundingRequest")
 }
 
 func (s *InvoiceService) GetByID(id uuid.UUID) (*models.Invoice, error) {
@@ -476,14 +377,9 @@ func (s *InvoiceService) GetGradeSuggestion(invoiceID uuid.UUID) (*models.AdminG
 		return nil, errors.New("invoice not found")
 	}
 
-	// Get buyer info
-	buyer, err := s.buyerRepo.FindByID(invoice.BuyerID)
-	if err != nil {
-		return nil, err
-	}
-	if buyer == nil {
-		return nil, errors.New("buyer not found")
-	}
+	// Calculate scores using grading logic
+	score := 0
+	countryRisk := "medium"
 
 	// Get documents for completeness check
 	docs, _ := s.invoiceRepo.FindDocumentsByInvoiceID(invoiceID)
@@ -492,14 +388,10 @@ func (s *InvoiceService) GetGradeSuggestion(invoiceID uuid.UUID) (*models.AdminG
 	// Get exporter invoice count for history
 	exporterInvoiceCount, _ := s.invoiceRepo.CountByExporter(invoice.ExporterID)
 
-	// Calculate scores using grading logic
-	score := 0
-	countryRisk := "medium"
-
 	// 1. Country Risk Score (40 points max)
 	countryScore := 25 // Default medium
 	countryTier := 2
-	if tier, ok := CountryRiskTier[buyer.Country]; ok {
+	if tier, ok := CountryRiskTier[invoice.BuyerCountry]; ok {
 		countryTier = tier
 	}
 
@@ -518,7 +410,7 @@ func (s *InvoiceService) GetGradeSuggestion(invoiceID uuid.UUID) (*models.AdminG
 
 	// 2. History Score (30 points max)
 	historyScore := 10 // Default for first time
-	isRepeatBuyer := buyer.TotalPaid > 0 || invoice.IsRepeatBuyer
+	isRepeatBuyer := invoice.IsRepeatBuyer
 	if isRepeatBuyer {
 		historyScore = 30
 	} else if exporterInvoiceCount >= 1 {
@@ -575,8 +467,7 @@ func (s *InvoiceService) GetInvoiceReviewData(invoiceID uuid.UUID) (*models.Invo
 		return nil, errors.New("invoice not found")
 	}
 
-	// Get buyer
-	buyer, _ := s.buyerRepo.FindByID(invoice.BuyerID)
+	// Get buyer info (From invoice fields directly)
 
 	// Get exporter profile
 	var exporterProfile *models.UserProfile
@@ -609,7 +500,6 @@ func (s *InvoiceService) GetInvoiceReviewData(invoiceID uuid.UUID) (*models.Invo
 
 	return &models.InvoiceReviewData{
 		Invoice:         *invoice,
-		Buyer:           buyer,
 		Exporter:        exporterProfile,
 		Documents:       docStatuses,
 		GradeSuggestion: *gradeSuggestion,

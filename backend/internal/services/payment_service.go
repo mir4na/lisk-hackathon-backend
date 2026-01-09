@@ -185,7 +185,7 @@ func (s *PaymentService) GetBalance(userID uuid.UUID) (*BalanceResponse, error) 
 			response.ExpectedReturn = portfolio.TotalExpectedGain
 		}
 		response.Description = "Saldo dana yang tersedia untuk pendanaan"
-	} else if user.Role == models.RoleExporter || user.Role == models.RoleMitra {
+	} else if user.Role == models.RoleMitra {
 		// For Mitra: show total owed to investors
 		filter := &models.InvoiceFilter{
 			Page:    1,

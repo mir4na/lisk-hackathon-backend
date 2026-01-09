@@ -6,14 +6,6 @@ async function main() {
   console.log("Deploying contracts with account:", deployer.address);
   console.log("Account balance:", (await deployer.provider.getBalance(deployer.address)).toString());
 
-  // Deploy MockUSDC (for testnet)
-  console.log("\n1. Deploying MockUSDC...");
-  const MockUSDC = await hre.ethers.getContractFactory("MockUSDC");
-  const mockUSDC = await MockUSDC.deploy();
-  await mockUSDC.waitForDeployment();
-  const mockUSDCAddress = await mockUSDC.getAddress();
-  console.log("MockUSDC deployed to:", mockUSDCAddress);
-
   // Deploy InvoiceNFT
   console.log("\n2. Deploying InvoiceNFT...");
   const InvoiceNFT = await hre.ethers.getContractFactory("InvoiceNFT");
@@ -27,7 +19,6 @@ async function main() {
   const InvoicePool = await hre.ethers.getContractFactory("InvoicePool");
   const invoicePool = await InvoicePool.deploy(
     invoiceNFTAddress,
-    mockUSDCAddress,
     deployer.address // Platform wallet
   );
   await invoicePool.waitForDeployment();
@@ -51,7 +42,6 @@ async function main() {
   console.log("Deployment Summary:");
   console.log("========================================");
   console.log("Network:", hre.network.name);
-  console.log("MockUSDC:", mockUSDCAddress);
   console.log("InvoiceNFT:", invoiceNFTAddress);
   console.log("InvoicePool:", invoicePoolAddress);
   console.log("========================================");
@@ -63,7 +53,6 @@ async function main() {
     chainId: (await deployer.provider.getNetwork()).chainId.toString(),
     deployer: deployer.address,
     contracts: {
-      MockUSDC: mockUSDCAddress,
       InvoiceNFT: invoiceNFTAddress,
       InvoicePool: invoicePoolAddress,
     },

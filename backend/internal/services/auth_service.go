@@ -57,26 +57,10 @@ func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginRespon
 		return nil, err
 	}
 
-	// Validate role selection (only investor or mitra - guest means unregistered)
+	// Validate role selection (only investor or mitra)
 	role := req.Role
 	if role != models.RoleInvestor && role != models.RoleMitra {
 		return nil, errors.New("invalid role, must be investor or mitra")
-	}
-
-	// Validate NIK format (16 digits)
-	if len(req.NIK) != 16 {
-		return nil, errors.New("NIK must be exactly 16 digits")
-	}
-
-	// Validate bank account name matches KTP name (abstracted - always pass for MVP)
-	// In production, this would use a bank verification API like Didit
-	if !s.validateBankAccountName(req.FullName, req.AccountName) {
-		return nil, errors.New("nama pemilik rekening harus sama dengan nama di KTP")
-	}
-
-	// Validate bank code is supported
-	if !s.isSupportedBank(req.BankCode) {
-		return nil, errors.New("bank tidak didukung")
 	}
 
 	// Determine member status based on role
@@ -85,7 +69,7 @@ func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginRespon
 		memberStatus = models.MemberStatusMemberMitra
 	}
 
-	// Create user with selected role
+	// Create user without profile (profile will be completed later)
 	username := req.Username
 	user := &models.User{
 		Email:                req.Email,
@@ -93,51 +77,17 @@ func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginRespon
 		PhoneNumber:          nil,
 		PasswordHash:         hashedPassword,
 		Role:                 role,
-		IsVerified:           true, // KYC submitted at registration
+		IsVerified:           false, // Not verified until profile is completed
 		IsActive:             true,
 		CooperativeAgreement: req.CooperativeAgreement,
 		MemberStatus:         memberStatus,
 		BalanceIDR:           0,
-		EmailVerified:        true,
+		EmailVerified:        true, // Email verified via OTP
 	}
 
-	profile := &models.UserProfile{
-		FullName:    req.FullName, // Use full name from KTP
-		Phone:       nil,
-		CompanyName: req.CompanyName,
-		Country:     req.Country,
-	}
-
-	if err := s.userRepo.Create(user, profile); err != nil {
+	// Create user without profile - profile will be created during profile completion
+	if err := s.userRepo.Create(user, nil); err != nil {
 		return nil, err
-	}
-
-	// Store identity data (KYC)
-	identity := &models.UserIdentity{
-		UserID:      user.ID,
-		NIK:         req.NIK,
-		FullName:    req.FullName,
-		KTPPhotoURL: req.KTPPhotoURL,
-		SelfieURL:   req.SelfieURL,
-		IsVerified:  true, // Auto-verified for MVP
-	}
-	if err := s.userRepo.CreateIdentity(identity); err != nil {
-		// Log but don't fail - identity is supplementary
-		// In production, this would be critical
-	}
-
-	// Store bank account
-	bankAccount := &models.BankAccount{
-		UserID:        user.ID,
-		BankCode:      req.BankCode,
-		BankName:      s.getBankName(req.BankCode),
-		AccountNumber: req.AccountNumber,
-		AccountName:   req.AccountName,
-		IsVerified:    true, // Auto-verified for MVP
-		IsPrimary:     true, // First account is always primary
-	}
-	if err := s.userRepo.CreateBankAccount(bankAccount); err != nil {
-		// Log but don't fail
 	}
 
 	// Generate tokens
@@ -157,35 +107,6 @@ func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginRespon
 		RefreshToken: refreshToken,
 		ExpiresIn:    3600 * 24, // 24 hours in seconds
 	}, nil
-}
-
-// validateBankAccountName checks if bank account name matches KTP name
-// For MVP: abstracted to always return true
-// In production: integrate with bank verification API (e.g., Didit)
-func (s *AuthService) validateBankAccountName(ktpName, accountName string) bool {
-	// MVP: Always return true (abstracted validation)
-	// TODO: Integrate with bank verification API
-	return true
-}
-
-// isSupportedBank checks if bank code is in supported list
-func (s *AuthService) isSupportedBank(bankCode string) bool {
-	for _, bank := range models.GetSupportedBanks() {
-		if bank.Code == bankCode {
-			return true
-		}
-	}
-	return false
-}
-
-// getBankName returns bank name from code
-func (s *AuthService) getBankName(bankCode string) string {
-	for _, bank := range models.GetSupportedBanks() {
-		if bank.Code == bankCode {
-			return bank.Name
-		}
-	}
-	return bankCode
 }
 
 func (s *AuthService) Login(req *models.LoginRequest) (*models.LoginResponse, error) {
