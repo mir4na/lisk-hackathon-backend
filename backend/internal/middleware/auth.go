@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/receiv3/backend/internal/utils"
+	"github.com/vessel/backend/internal/utils"
 )
 
 func AuthMiddleware(jwtManager *utils.JWTManager) gin.HandlerFunc {

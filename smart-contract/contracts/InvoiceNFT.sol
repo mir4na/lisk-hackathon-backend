@@ -9,7 +9,7 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title InvoiceNFT
- * @dev NFT representing tokenized invoices for the Receiv3 platform
+ * @dev NFT representing tokenized invoices for the VESSEL platform
  * Each NFT represents a real-world invoice that can be used as collateral for funding
  */
 contract InvoiceNFT is
@@ -69,7 +69,7 @@ contract InvoiceNFT is
     event ShipmentVerified(uint256 indexed tokenId, address verifier);
     event InvoiceBurned(uint256 indexed tokenId, string reason);
 
-    constructor() ERC721("Receiv3 Invoice NFT", "R3INV") {
+    constructor() ERC721("VESSEL Invoice NFT", "VINV") {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MINTER_ROLE, msg.sender);
         _grantRole(ORACLE_ROLE, msg.sender);

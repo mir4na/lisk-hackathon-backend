@@ -5,7 +5,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: receiv3-backend
+    container_name: vessel-backend
     ports:
       - "8080:8080"
     environment:
@@ -16,50 +16,50 @@ services:
       - postgres
       - redis
     networks:
-      - receiv3-network
+      - vessel-network
     restart: unless-stopped
 
   smart-contract:
     build:
       context: ./smart-contract
       dockerfile: Dockerfile
-    container_name: receiv3-hardhat
+    container_name: vessel-hardhat
     ports:
       - "8545:8545"
     environment:
       - PRIVATE_KEY=${PRIVATE_KEY}
     networks:
-      - receiv3-network
+      - vessel-network
     restart: unless-stopped
 
   postgres:
     image: postgres:16-alpine
-    container_name: receiv3-postgres
+    container_name: vessel-postgres
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-receiv3}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-receiv3}
-      - POSTGRES_DB=${POSTGRES_DB:-receiv3}
+      - POSTGRES_USER=${POSTGRES_USER:-vessel}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-vessel}
+      - POSTGRES_DB=${POSTGRES_DB:-vessel}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - receiv3-network
+      - vessel-network
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    container_name: receiv3-redis
+    container_name: vessel-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
-      - receiv3-network
+      - vessel-network
     restart: unless-stopped
 
 networks:
-  receiv3-network:
+  vessel-network:
     driver: bridge
 
 volumes:

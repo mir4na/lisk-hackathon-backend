@@ -37,7 +37,7 @@ func (m *JWTManager) GenerateAccessToken(userID uuid.UUID, email, role string) (
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(m.accessTokenExpiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "receiv3",
+			Issuer:    "vessel",
 		},
 	}
 
@@ -53,7 +53,7 @@ func (m *JWTManager) GenerateRefreshToken(userID uuid.UUID, email, role string) 
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(m.refreshTokenExpiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "receiv3-refresh",
+			Issuer:    "vessel-refresh",
 		},
 	}
 

@@ -22,40 +22,68 @@ const (
 )
 
 type Invoice struct {
-	ID                uuid.UUID      `json:"id"`
-	ExporterID        uuid.UUID      `json:"exporter_id"`
-	BuyerID           uuid.UUID      `json:"buyer_id"`
-	InvoiceNumber     string         `json:"invoice_number"`
-	Currency          string         `json:"currency"`
-	Amount            float64        `json:"amount"`
-	IssueDate         time.Time      `json:"issue_date"`
-	DueDate           time.Time      `json:"due_date"`
-	Description       *string        `json:"description,omitempty"`
-	Status            InvoiceStatus  `json:"status"`
-	InterestRate      *float64       `json:"interest_rate,omitempty"`
-	AdvancePercentage float64        `json:"advance_percentage"`
-	AdvanceAmount     *float64       `json:"advance_amount,omitempty"`
-	DocumentHash      *string        `json:"document_hash,omitempty"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
+	ID                uuid.UUID     `json:"id"`
+	ExporterID        uuid.UUID     `json:"exporter_id"`
+	BuyerID           uuid.UUID     `json:"buyer_id"`
+	InvoiceNumber     string        `json:"invoice_number"`
+	Currency          string        `json:"currency"`
+	Amount            float64       `json:"amount"`
+	IssueDate         time.Time     `json:"issue_date"`
+	DueDate           time.Time     `json:"due_date"`
+	Description       *string       `json:"description,omitempty"`
+	Status            InvoiceStatus `json:"status"`
+	InterestRate      *float64      `json:"interest_rate,omitempty"`
+	AdvancePercentage float64       `json:"advance_percentage"`
+	AdvanceAmount     *float64      `json:"advance_amount,omitempty"`
+	DocumentHash      *string       `json:"document_hash,omitempty"`
+	CreatedAt         time.Time     `json:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at"`
+
+	// VESSEL Grading Fields
+	Grade                  *string `json:"grade,omitempty"`          // A, B, or C
+	GradeScore             *int    `json:"grade_score,omitempty"`    // Numeric score 0-100
+	IsRepeatBuyer          bool    `json:"is_repeat_buyer"`          // True if buyer has previous transactions
+	FundingLimitPercentage float64 `json:"funding_limit_percentage"` // Max funding % (60% for new, 100% for repeat)
+	IsInsured              bool    `json:"is_insured"`               // True if invoice has insurance
+	DocumentCompleteScore  int     `json:"document_complete_score"`  // 0-100 based on document completeness
+	BuyerCountryRisk       *string `json:"buyer_country_risk,omitempty"` // low, medium, high
+
+	// VESSEL Tranche/Interest Fields
+	PriorityRatio        float64  `json:"priority_ratio"`                   // Default 80%
+	CatalystRatio        float64  `json:"catalyst_ratio"`                   // Default 20%
+	PriorityInterestRate *float64 `json:"priority_interest_rate,omitempty"` // e.g., 10%
+	CatalystInterestRate *float64 `json:"catalyst_interest_rate,omitempty"` // e.g., 15%
+
+	// VESSEL Currency Conversion Fields
+	OriginalCurrency *string  `json:"original_currency,omitempty"`
+	OriginalAmount   *float64 `json:"original_amount,omitempty"`
+	IDRXAmount       *float64 `json:"idrx_amount,omitempty"`
+	ExchangeRate     *float64 `json:"exchange_rate,omitempty"`
+	BufferRate       float64  `json:"buffer_rate"` // Default 1.5%
+
+	// VESSEL Additional Fields
+	FundingDurationDays int     `json:"funding_duration_days"` // Default 14 days
+	PaymentLink         *string `json:"payment_link,omitempty"`
 
 	// Relations
-	Buyer     *Buyer             `json:"buyer,omitempty"`
-	Exporter  *User              `json:"exporter,omitempty"`
-	Documents []InvoiceDocument  `json:"documents,omitempty"`
-	NFT       *InvoiceNFT        `json:"nft,omitempty"`
+	Buyer     *Buyer            `json:"buyer,omitempty"`
+	Exporter  *User             `json:"exporter,omitempty"`
+	Documents []InvoiceDocument `json:"documents,omitempty"`
+	NFT       *InvoiceNFT       `json:"nft,omitempty"`
 }
 
 type DocumentType string
 
 const (
-	DocTypeInvoicePDF           DocumentType = "invoice_pdf"
-	DocTypeBillOfLading         DocumentType = "bill_of_lading"
-	DocTypePackingList          DocumentType = "packing_list"
-	DocTypeCertificateOfOrigin  DocumentType = "certificate_of_origin"
-	DocTypeInsurance            DocumentType = "insurance"
-	DocTypeCustoms              DocumentType = "customs"
-	DocTypeOther                DocumentType = "other"
+	DocTypeInvoicePDF          DocumentType = "invoice_pdf"
+	DocTypeBillOfLading        DocumentType = "bill_of_lading"
+	DocTypePackingList         DocumentType = "packing_list"
+	DocTypeCertificateOfOrigin DocumentType = "certificate_of_origin"
+	DocTypeInsurance           DocumentType = "insurance"
+	DocTypeCustoms             DocumentType = "customs"
+	DocTypeOther               DocumentType = "other"
+	DocTypePurchaseOrder       DocumentType = "purchase_order"
+	DocTypeCommercialInvoice   DocumentType = "commercial_invoice"
 )
 
 type InvoiceDocument struct {

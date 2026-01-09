@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/receiv3/backend/internal/models"
+	"github.com/vessel/backend/internal/models"
 )
 
 type BuyerRepository struct {

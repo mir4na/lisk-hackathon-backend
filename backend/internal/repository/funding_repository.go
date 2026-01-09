@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/receiv3/backend/internal/models"
+	"github.com/vessel/backend/internal/models"
 )
 
 type FundingRepository struct {
@@ -21,8 +21,12 @@ func NewFundingRepository(db *sql.DB) *FundingRepository {
 func (r *FundingRepository) CreatePool(pool *models.FundingPool) error {
 	now := time.Now()
 	query := `
-		INSERT INTO funding_pools (invoice_id, target_amount, status, opened_at)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO funding_pools (
+			invoice_id, target_amount, status, opened_at, deadline,
+			priority_target, priority_funded, catalyst_target, catalyst_funded,
+			priority_interest_rate, catalyst_interest_rate, pool_currency
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, funded_amount, investor_count, created_at, updated_at
 	`
 	return r.db.QueryRow(
@@ -31,6 +35,14 @@ func (r *FundingRepository) CreatePool(pool *models.FundingPool) error {
 		pool.TargetAmount,
 		pool.Status,
 		now,
+		pool.Deadline,
+		pool.PriorityTarget,
+		pool.PriorityFunded,
+		pool.CatalystTarget,
+		pool.CatalystFunded,
+		pool.PriorityInterestRate,
+		pool.CatalystInterestRate,
+		pool.PoolCurrency,
 	).Scan(&pool.ID, &pool.FundedAmount, &pool.InvestorCount, &pool.CreatedAt, &pool.UpdatedAt)
 }
 
@@ -38,7 +50,11 @@ func (r *FundingRepository) FindPoolByID(id uuid.UUID) (*models.FundingPool, err
 	pool := &models.FundingPool{}
 	query := `
 		SELECT id, invoice_id, target_amount, funded_amount, investor_count, status,
-		       opened_at, filled_at, disbursed_at, closed_at, created_at, updated_at
+		       opened_at, deadline, filled_at, disbursed_at, closed_at, created_at, updated_at,
+		       COALESCE(priority_target, 0), COALESCE(priority_funded, 0),
+		       COALESCE(catalyst_target, 0), COALESCE(catalyst_funded, 0),
+		       COALESCE(priority_interest_rate, 0), COALESCE(catalyst_interest_rate, 0),
+		       COALESCE(pool_currency, 'IDRX')
 		FROM funding_pools
 		WHERE id = $1
 	`
@@ -50,11 +66,19 @@ func (r *FundingRepository) FindPoolByID(id uuid.UUID) (*models.FundingPool, err
 		&pool.InvestorCount,
 		&pool.Status,
 		&pool.OpenedAt,
+		&pool.Deadline,
 		&pool.FilledAt,
 		&pool.DisbursedAt,
 		&pool.ClosedAt,
 		&pool.CreatedAt,
 		&pool.UpdatedAt,
+		&pool.PriorityTarget,
+		&pool.PriorityFunded,
+		&pool.CatalystTarget,
+		&pool.CatalystFunded,
+		&pool.PriorityInterestRate,
+		&pool.CatalystInterestRate,
+		&pool.PoolCurrency,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -69,7 +93,11 @@ func (r *FundingRepository) FindPoolByInvoiceID(invoiceID uuid.UUID) (*models.Fu
 	pool := &models.FundingPool{}
 	query := `
 		SELECT id, invoice_id, target_amount, funded_amount, investor_count, status,
-		       opened_at, filled_at, disbursed_at, closed_at, created_at, updated_at
+		       opened_at, deadline, filled_at, disbursed_at, closed_at, created_at, updated_at,
+		       COALESCE(priority_target, 0), COALESCE(priority_funded, 0),
+		       COALESCE(catalyst_target, 0), COALESCE(catalyst_funded, 0),
+		       COALESCE(priority_interest_rate, 0), COALESCE(catalyst_interest_rate, 0),
+		       COALESCE(pool_currency, 'IDRX')
 		FROM funding_pools
 		WHERE invoice_id = $1
 	`
@@ -81,11 +109,19 @@ func (r *FundingRepository) FindPoolByInvoiceID(invoiceID uuid.UUID) (*models.Fu
 		&pool.InvestorCount,
 		&pool.Status,
 		&pool.OpenedAt,
+		&pool.Deadline,
 		&pool.FilledAt,
 		&pool.DisbursedAt,
 		&pool.ClosedAt,
 		&pool.CreatedAt,
 		&pool.UpdatedAt,
+		&pool.PriorityTarget,
+		&pool.PriorityFunded,
+		&pool.CatalystTarget,
+		&pool.CatalystFunded,
+		&pool.PriorityInterestRate,
+		&pool.CatalystInterestRate,
+		&pool.PoolCurrency,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -106,7 +142,11 @@ func (r *FundingRepository) FindOpenPools(page, perPage int) ([]models.FundingPo
 	offset := (page - 1) * perPage
 	query := `
 		SELECT fp.id, fp.invoice_id, fp.target_amount, fp.funded_amount, fp.investor_count, fp.status,
-		       fp.opened_at, fp.filled_at, fp.disbursed_at, fp.closed_at, fp.created_at, fp.updated_at
+		       fp.opened_at, fp.deadline, fp.filled_at, fp.disbursed_at, fp.closed_at, fp.created_at, fp.updated_at,
+		       COALESCE(fp.priority_target, 0), COALESCE(fp.priority_funded, 0),
+		       COALESCE(fp.catalyst_target, 0), COALESCE(fp.catalyst_funded, 0),
+		       COALESCE(fp.priority_interest_rate, 0), COALESCE(fp.catalyst_interest_rate, 0),
+		       COALESCE(fp.pool_currency, 'IDRX')
 		FROM funding_pools fp
 		WHERE fp.status = 'open'
 		ORDER BY fp.opened_at DESC
@@ -129,11 +169,19 @@ func (r *FundingRepository) FindOpenPools(page, perPage int) ([]models.FundingPo
 			&pool.InvestorCount,
 			&pool.Status,
 			&pool.OpenedAt,
+			&pool.Deadline,
 			&pool.FilledAt,
 			&pool.DisbursedAt,
 			&pool.ClosedAt,
 			&pool.CreatedAt,
 			&pool.UpdatedAt,
+			&pool.PriorityTarget,
+			&pool.PriorityFunded,
+			&pool.CatalystTarget,
+			&pool.CatalystFunded,
+			&pool.PriorityInterestRate,
+			&pool.CatalystInterestRate,
+			&pool.PoolCurrency,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -149,6 +197,33 @@ func (r *FundingRepository) UpdatePoolFunding(id uuid.UUID, amount float64) erro
 		WHERE id = $3
 	`
 	_, err := r.db.Exec(query, amount, time.Now(), id)
+	return err
+}
+
+// UpdatePoolTrancheFunding updates funding for a specific tranche
+func (r *FundingRepository) UpdatePoolTrancheFunding(id uuid.UUID, amount float64, tranche models.TrancheType) error {
+	now := time.Now()
+	var query string
+	if tranche == models.TranchePriority {
+		query = `
+			UPDATE funding_pools
+			SET funded_amount = funded_amount + $1,
+			    priority_funded = COALESCE(priority_funded, 0) + $1,
+			    investor_count = investor_count + 1,
+			    updated_at = $2
+			WHERE id = $3
+		`
+	} else {
+		query = `
+			UPDATE funding_pools
+			SET funded_amount = funded_amount + $1,
+			    catalyst_funded = COALESCE(catalyst_funded, 0) + $1,
+			    investor_count = investor_count + 1,
+			    updated_at = $2
+			WHERE id = $3
+		`
+	}
+	_, err := r.db.Exec(query, amount, now, id)
 	return err
 }
 
@@ -173,8 +248,8 @@ func (r *FundingRepository) UpdatePoolStatus(id uuid.UUID, status models.PoolSta
 // Investment methods
 func (r *FundingRepository) CreateInvestment(inv *models.Investment) error {
 	query := `
-		INSERT INTO investments (pool_id, investor_id, amount, expected_return, status, tx_hash)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO investments (pool_id, investor_id, amount, expected_return, status, tranche, tx_hash)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, invested_at, created_at, updated_at
 	`
 	return r.db.QueryRow(
@@ -184,6 +259,7 @@ func (r *FundingRepository) CreateInvestment(inv *models.Investment) error {
 		inv.Amount,
 		inv.ExpectedReturn,
 		inv.Status,
+		inv.Tranche,
 		inv.TxHash,
 	).Scan(&inv.ID, &inv.InvestedAt, &inv.CreatedAt, &inv.UpdatedAt)
 }
@@ -191,8 +267,8 @@ func (r *FundingRepository) CreateInvestment(inv *models.Investment) error {
 func (r *FundingRepository) FindInvestmentByID(id uuid.UUID) (*models.Investment, error) {
 	inv := &models.Investment{}
 	query := `
-		SELECT id, pool_id, investor_id, amount, expected_return, actual_return, status, tx_hash,
-		       invested_at, repaid_at, created_at, updated_at
+		SELECT id, pool_id, investor_id, amount, expected_return, actual_return, status,
+		       COALESCE(tranche, 'priority'), tx_hash, invested_at, repaid_at, created_at, updated_at
 		FROM investments
 		WHERE id = $1
 	`
@@ -204,6 +280,7 @@ func (r *FundingRepository) FindInvestmentByID(id uuid.UUID) (*models.Investment
 		&inv.ExpectedReturn,
 		&inv.ActualReturn,
 		&inv.Status,
+		&inv.Tranche,
 		&inv.TxHash,
 		&inv.InvestedAt,
 		&inv.RepaidAt,
@@ -228,8 +305,8 @@ func (r *FundingRepository) FindInvestmentsByInvestor(investorID uuid.UUID, page
 
 	offset := (page - 1) * perPage
 	query := `
-		SELECT id, pool_id, investor_id, amount, expected_return, actual_return, status, tx_hash,
-		       invested_at, repaid_at, created_at, updated_at
+		SELECT id, pool_id, investor_id, amount, expected_return, actual_return, status,
+		       COALESCE(tranche, 'priority'), tx_hash, invested_at, repaid_at, created_at, updated_at
 		FROM investments
 		WHERE investor_id = $1
 		ORDER BY invested_at DESC
@@ -252,6 +329,7 @@ func (r *FundingRepository) FindInvestmentsByInvestor(investorID uuid.UUID, page
 			&inv.ExpectedReturn,
 			&inv.ActualReturn,
 			&inv.Status,
+			&inv.Tranche,
 			&inv.TxHash,
 			&inv.InvestedAt,
 			&inv.RepaidAt,
@@ -267,10 +345,11 @@ func (r *FundingRepository) FindInvestmentsByInvestor(investorID uuid.UUID, page
 
 func (r *FundingRepository) FindInvestmentsByPool(poolID uuid.UUID) ([]models.Investment, error) {
 	query := `
-		SELECT id, pool_id, investor_id, amount, expected_return, actual_return, status, tx_hash,
-		       invested_at, repaid_at, created_at, updated_at
+		SELECT id, pool_id, investor_id, amount, expected_return, actual_return, status,
+		       COALESCE(tranche, 'priority'), tx_hash, invested_at, repaid_at, created_at, updated_at
 		FROM investments
 		WHERE pool_id = $1
+		ORDER BY tranche ASC, invested_at ASC
 	`
 	rows, err := r.db.Query(query, poolID)
 	if err != nil {
@@ -289,6 +368,47 @@ func (r *FundingRepository) FindInvestmentsByPool(poolID uuid.UUID) ([]models.In
 			&inv.ExpectedReturn,
 			&inv.ActualReturn,
 			&inv.Status,
+			&inv.Tranche,
+			&inv.TxHash,
+			&inv.InvestedAt,
+			&inv.RepaidAt,
+			&inv.CreatedAt,
+			&inv.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		investments = append(investments, inv)
+	}
+	return investments, nil
+}
+
+// FindInvestmentsByPoolAndTranche returns investments for a pool filtered by tranche
+func (r *FundingRepository) FindInvestmentsByPoolAndTranche(poolID uuid.UUID, tranche models.TrancheType) ([]models.Investment, error) {
+	query := `
+		SELECT id, pool_id, investor_id, amount, expected_return, actual_return, status,
+		       COALESCE(tranche, 'priority'), tx_hash, invested_at, repaid_at, created_at, updated_at
+		FROM investments
+		WHERE pool_id = $1 AND tranche = $2
+		ORDER BY invested_at ASC
+	`
+	rows, err := r.db.Query(query, poolID, tranche)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var investments []models.Investment
+	for rows.Next() {
+		var inv models.Investment
+		if err := rows.Scan(
+			&inv.ID,
+			&inv.PoolID,
+			&inv.InvestorID,
+			&inv.Amount,
+			&inv.ExpectedReturn,
+			&inv.ActualReturn,
+			&inv.Status,
+			&inv.Tranche,
 			&inv.TxHash,
 			&inv.InvestedAt,
 			&inv.RepaidAt,
@@ -307,4 +427,37 @@ func (r *FundingRepository) UpdateInvestmentStatus(id uuid.UUID, status models.I
 	query := `UPDATE investments SET status = $1, actual_return = $2, repaid_at = $3, updated_at = $3 WHERE id = $4`
 	_, err := r.db.Exec(query, status, actualReturn, now, id)
 	return err
+}
+
+// GetInvestorPortfolio calculates portfolio summary for an investor
+func (r *FundingRepository) GetInvestorPortfolio(investorID uuid.UUID) (*models.InvestorPortfolio, error) {
+	portfolio := &models.InvestorPortfolio{}
+
+	query := `
+		SELECT 
+			COALESCE(SUM(amount), 0) as total_funding,
+			COALESCE(SUM(expected_return - amount), 0) as total_expected_gain,
+			COALESCE(SUM(CASE WHEN status = 'repaid' THEN COALESCE(actual_return, 0) - amount ELSE 0 END), 0) as total_realized_gain,
+			COALESCE(SUM(CASE WHEN tranche = 'priority' THEN amount ELSE 0 END), 0) as priority_allocation,
+			COALESCE(SUM(CASE WHEN tranche = 'catalyst' THEN amount ELSE 0 END), 0) as catalyst_allocation,
+			COUNT(CASE WHEN status = 'active' THEN 1 END) as active_investments,
+			COUNT(CASE WHEN status = 'repaid' THEN 1 END) as completed_deals
+		FROM investments
+		WHERE investor_id = $1
+	`
+
+	err := r.db.QueryRow(query, investorID).Scan(
+		&portfolio.TotalFunding,
+		&portfolio.TotalExpectedGain,
+		&portfolio.TotalRealizedGain,
+		&portfolio.PriorityAllocation,
+		&portfolio.CatalystAllocation,
+		&portfolio.ActiveInvestments,
+		&portfolio.CompletedDeals,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return portfolio, nil
 }

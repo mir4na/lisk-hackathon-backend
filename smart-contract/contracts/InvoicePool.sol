@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
@@ -11,17 +9,16 @@ import "./InvoiceNFT.sol";
 
 /**
  * @title InvoicePool
- * @dev Manages funding pools for invoice NFTs
- * Investors can fund invoices and receive returns when buyers repay
+ * @dev Manages funding pools for invoice NFTs on VESSEL platform
+ * NOTE: This contract uses ABSTRACTED payments - amounts are recorded on-chain
+ * but actual payments are handled off-chain. No ERC20 token transfers.
+ * This provides blockchain transparency without requiring token integration.
  */
 contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
-    using SafeERC20 for IERC20;
-
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
     // Contracts
     InvoiceNFT public invoiceNFT;
-    IERC20 public stablecoin; // USDC or similar
 
     // Platform fee in basis points (e.g., 200 = 2%)
     uint256 public platformFeeBps = 200;
@@ -52,7 +49,7 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
         uint256 closedAt;
     }
 
-    // Investment structure
+    // Investment structure - records investment details on-chain for transparency
     struct Investment {
         address investor;
         uint256 amount;
@@ -67,19 +64,39 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
     mapping(uint256 => Investment[]) public poolInvestments; // tokenId => investments
     mapping(address => uint256[]) public investorPools; // investor => tokenIds they invested in
 
-    // Events
-    event PoolCreated(uint256 indexed tokenId, uint256 targetAmount, uint256 interestRate);
-    event InvestmentMade(uint256 indexed tokenId, address indexed investor, uint256 amount, uint256 expectedReturn);
-    event PoolFilled(uint256 indexed tokenId, uint256 totalAmount, uint256 investorCount);
-    event FundsDisbursed(uint256 indexed tokenId, address indexed exporter, uint256 amount);
-    event RepaymentReceived(uint256 indexed tokenId, uint256 amount);
-    event InvestorPaid(uint256 indexed tokenId, address indexed investor, uint256 amount);
+    // Events - All transactions are recorded on-chain via events
+    event PoolCreated(
+        uint256 indexed tokenId,
+        uint256 targetAmount,
+        uint256 interestRate
+    );
+    event InvestmentRecorded(
+        uint256 indexed tokenId,
+        address indexed investor,
+        uint256 amount,
+        uint256 expectedReturn
+    );
+    event PoolFilled(
+        uint256 indexed tokenId,
+        uint256 totalAmount,
+        uint256 investorCount
+    );
+    event DisbursementRecorded(
+        uint256 indexed tokenId,
+        address indexed exporter,
+        uint256 amount
+    );
+    event RepaymentRecorded(uint256 indexed tokenId, uint256 amount);
+    event InvestorReturnRecorded(
+        uint256 indexed tokenId,
+        address indexed investor,
+        uint256 amount
+    );
     event PoolClosed(uint256 indexed tokenId);
     event PoolDefaulted(uint256 indexed tokenId);
 
-    constructor(address _invoiceNFT, address _stablecoin, address _platformWallet) {
+    constructor(address _invoiceNFT, address _platformWallet) {
         invoiceNFT = InvoiceNFT(_invoiceNFT);
-        stablecoin = IERC20(_stablecoin);
         platformWallet = _platformWallet;
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -89,7 +106,9 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
     /**
      * @dev Create a funding pool for an invoice
      */
-    function createPool(uint256 tokenId) external onlyRole(OPERATOR_ROLE) whenNotPaused {
+    function createPool(
+        uint256 tokenId
+    ) external onlyRole(OPERATOR_ROLE) whenNotPaused {
         require(invoiceNFT.isFundable(tokenId), "Invoice not fundable");
         require(pools[tokenId].targetAmount == 0, "Pool already exists");
 
@@ -117,9 +136,17 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @dev Invest in a pool
+     * @dev Record an investment (called by operator after off-chain payment is verified)
+     * NOTE: No actual token transfer - this only records the investment on-chain
+     * @param tokenId The pool token ID
+     * @param investor The investor's wallet address
+     * @param amount The investment amount (in smallest unit)
      */
-    function invest(uint256 tokenId, uint256 amount) external nonReentrant whenNotPaused {
+    function recordInvestment(
+        uint256 tokenId,
+        address investor,
+        uint256 amount
+    ) external onlyRole(OPERATOR_ROLE) nonReentrant whenNotPaused {
         Pool storage pool = pools[tokenId];
         require(pool.targetAmount > 0, "Pool does not exist");
         require(pool.status == PoolStatus.Open, "Pool not open");
@@ -131,26 +158,27 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
         // Calculate expected return based on interest rate and time
         uint256 daysToMaturity = (pool.dueDate - block.timestamp) / 1 days;
         if (daysToMaturity == 0) daysToMaturity = 1;
-        uint256 expectedReturn = amount + (amount * pool.interestRate * daysToMaturity) / (365 * 10000);
+        uint256 expectedReturn = amount +
+            (amount * pool.interestRate * daysToMaturity) /
+            (365 * 10000);
 
-        // Transfer stablecoin from investor
-        stablecoin.safeTransferFrom(msg.sender, address(this), amount);
-
-        // Record investment
-        poolInvestments[tokenId].push(Investment({
-            investor: msg.sender,
-            amount: amount,
-            expectedReturn: expectedReturn,
-            actualReturn: 0,
-            claimed: false,
-            investedAt: block.timestamp
-        }));
+        // Record investment on-chain (no token transfer)
+        poolInvestments[tokenId].push(
+            Investment({
+                investor: investor,
+                amount: amount,
+                expectedReturn: expectedReturn,
+                actualReturn: 0,
+                claimed: false,
+                investedAt: block.timestamp
+            })
+        );
 
         pool.fundedAmount += amount;
         pool.investorCount++;
-        investorPools[msg.sender].push(tokenId);
+        investorPools[investor].push(tokenId);
 
-        emit InvestmentMade(tokenId, msg.sender, amount, expectedReturn);
+        emit InvestmentRecorded(tokenId, investor, amount, expectedReturn);
 
         // Check if pool is filled
         if (pool.fundedAmount >= pool.targetAmount) {
@@ -161,52 +189,53 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @dev Disburse funds to exporter
+     * @dev Record disbursement to exporter (called after off-chain payment is made)
+     * NOTE: No actual token transfer - this only records the disbursement on-chain
      */
-    function disburse(uint256 tokenId) external onlyRole(OPERATOR_ROLE) nonReentrant {
+    function recordDisbursement(
+        uint256 tokenId
+    ) external onlyRole(OPERATOR_ROLE) nonReentrant {
         Pool storage pool = pools[tokenId];
         require(pool.status == PoolStatus.Filled, "Pool not filled");
 
         pool.status = PoolStatus.Disbursed;
         pool.disbursedAt = block.timestamp;
 
-        // Transfer funds to exporter
-        stablecoin.safeTransfer(pool.exporter, pool.fundedAmount);
-
-        emit FundsDisbursed(tokenId, pool.exporter, pool.fundedAmount);
+        emit DisbursementRecorded(tokenId, pool.exporter, pool.fundedAmount);
     }
 
     /**
-     * @dev Process repayment from buyer
+     * @dev Record repayment and investor returns (called after importer pays off-chain)
+     * NOTE: No actual token transfer - this only records the repayment on-chain
+     * @param tokenId The pool token ID
+     * @param totalAmount Total amount repaid by importer
+     * @param investorReturns Array of actual returns for each investor (in order of investments)
      */
-    function processRepayment(uint256 tokenId, uint256 amount) external onlyRole(OPERATOR_ROLE) nonReentrant {
+    function recordRepayment(
+        uint256 tokenId,
+        uint256 totalAmount,
+        uint256[] calldata investorReturns
+    ) external onlyRole(OPERATOR_ROLE) nonReentrant {
         Pool storage pool = pools[tokenId];
         require(pool.status == PoolStatus.Disbursed, "Pool not disbursed");
 
-        // Calculate platform fee
-        uint256 platformFee = (amount * platformFeeBps) / 10000;
-        uint256 distributableAmount = amount - platformFee;
-
-        // Transfer platform fee
-        if (platformFee > 0) {
-            stablecoin.safeTransferFrom(msg.sender, platformWallet, platformFee);
-        }
-
-        // Transfer distributable amount to contract
-        stablecoin.safeTransferFrom(msg.sender, address(this), distributableAmount);
-
-        // Distribute to investors proportionally
         Investment[] storage investments = poolInvestments[tokenId];
+        require(
+            investorReturns.length == investments.length,
+            "Invalid returns array length"
+        );
+
+        // Record each investor's return
         for (uint256 i = 0; i < investments.length; i++) {
             Investment storage inv = investments[i];
-            uint256 proportion = (inv.amount * 1e18) / pool.fundedAmount;
-            uint256 payout = (distributableAmount * proportion) / 1e18;
-
-            inv.actualReturn = payout;
-            stablecoin.safeTransfer(inv.investor, payout);
+            inv.actualReturn = investorReturns[i];
             inv.claimed = true;
 
-            emit InvestorPaid(tokenId, inv.investor, payout);
+            emit InvestorReturnRecorded(
+                tokenId,
+                inv.investor,
+                investorReturns[i]
+            );
         }
 
         pool.status = PoolStatus.Closed;
@@ -215,7 +244,7 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
         // Update NFT status
         invoiceNFT.updateStatus(tokenId, InvoiceNFT.InvoiceStatus.Repaid);
 
-        emit RepaymentReceived(tokenId, amount);
+        emit RepaymentRecorded(tokenId, totalAmount);
         emit PoolClosed(tokenId);
     }
 
@@ -225,7 +254,10 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
     function markDefaulted(uint256 tokenId) external onlyRole(OPERATOR_ROLE) {
         Pool storage pool = pools[tokenId];
         require(pool.status == PoolStatus.Disbursed, "Pool not disbursed");
-        require(block.timestamp > pool.dueDate + 30 days, "Grace period not passed");
+        require(
+            block.timestamp > pool.dueDate + 30 days,
+            "Grace period not passed"
+        );
 
         pool.status = PoolStatus.Defaulted;
 
@@ -245,21 +277,27 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
     /**
      * @dev Get investments for a pool
      */
-    function getPoolInvestments(uint256 tokenId) external view returns (Investment[] memory) {
+    function getPoolInvestments(
+        uint256 tokenId
+    ) external view returns (Investment[] memory) {
         return poolInvestments[tokenId];
     }
 
     /**
      * @dev Get pools an investor has invested in
      */
-    function getInvestorPools(address investor) external view returns (uint256[] memory) {
+    function getInvestorPools(
+        address investor
+    ) external view returns (uint256[] memory) {
         return investorPools[investor];
     }
 
     /**
      * @dev Get remaining capacity in pool
      */
-    function getRemainingCapacity(uint256 tokenId) external view returns (uint256) {
+    function getRemainingCapacity(
+        uint256 tokenId
+    ) external view returns (uint256) {
         Pool memory pool = pools[tokenId];
         if (pool.status != PoolStatus.Open) return 0;
         return pool.targetAmount - pool.fundedAmount;
@@ -268,7 +306,9 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
     /**
      * @dev Update platform fee
      */
-    function setPlatformFee(uint256 newFeeBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setPlatformFee(
+        uint256 newFeeBps
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newFeeBps <= 1000, "Fee too high"); // Max 10%
         platformFeeBps = newFeeBps;
     }
@@ -276,7 +316,9 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
     /**
      * @dev Update platform wallet
      */
-    function setPlatformWallet(address newWallet) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setPlatformWallet(
+        address newWallet
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newWallet != address(0), "Invalid address");
         platformWallet = newWallet;
     }
@@ -290,12 +332,5 @@ contract InvoicePool is AccessControl, ReentrancyGuard, Pausable {
 
     function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _unpause();
-    }
-
-    /**
-     * @dev Emergency withdraw (admin only)
-     */
-    function emergencyWithdraw(address token, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        IERC20(token).safeTransfer(msg.sender, amount);
     }
 }

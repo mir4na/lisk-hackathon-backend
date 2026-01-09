@@ -16,6 +16,8 @@ const (
 	TxTypeInvestorReturn TransactionType = "investor_return"
 	TxTypePlatformFee    TransactionType = "platform_fee"
 	TxTypeRefund         TransactionType = "refund"
+	TxTypeDeposit        TransactionType = "deposit"
+	TxTypeWithdrawal     TransactionType = "withdrawal"
 
 	TxStatusPending   TransactionStatus = "pending"
 	TxStatusConfirmed TransactionStatus = "confirmed"

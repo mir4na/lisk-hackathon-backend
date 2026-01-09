@@ -3,9 +3,9 @@ package handlers
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/receiv3/backend/internal/models"
-	"github.com/receiv3/backend/internal/services"
-	"github.com/receiv3/backend/internal/utils"
+	"github.com/vessel/backend/internal/models"
+	"github.com/vessel/backend/internal/services"
+	"github.com/vessel/backend/internal/utils"
 )
 
 type FundingHandler struct {
@@ -204,4 +204,138 @@ func (h *FundingHandler) ProcessRepayment(c *gin.Context) {
 	}
 
 	utils.SuccessResponse(c, gin.H{"message": "Repayment processed successfully"})
+}
+
+// GetPortfolio godoc
+// @Summary Get investor portfolio summary
+// @Description Get a summary of investor's portfolio including total funding, gains, and allocation
+// @Tags Funding
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} models.InvestorPortfolio
+// @Router /investments/portfolio [get]
+func (h *FundingHandler) GetPortfolio(c *gin.Context) {
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	portfolio, err := h.fundingService.GetInvestorPortfolio(userID)
+	if err != nil {
+		utils.InternalServerError(c, "Failed to get portfolio")
+		return
+	}
+
+	utils.SuccessResponse(c, portfolio)
+}
+
+// GetMitraDashboard godoc
+// @Summary Get mitra dashboard data
+// @Description Get dashboard data for mitra including active financing and invoice status
+// @Tags Mitra
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} models.MitraDashboard
+// @Router /mitra/dashboard [get]
+func (h *FundingHandler) GetMitraDashboard(c *gin.Context) {
+	// Return placeholder data for now
+	// In a full implementation, this would query actual mitra financing data
+	dashboard := models.MitraDashboard{
+		TotalActiveFinancing:  0,
+		AverageRemainingTenor: 0,
+		ActiveInvoices:        []models.InvoiceDashboard{},
+		TimelineStatus:        "Belum ada pembiayaan aktif",
+	}
+
+	utils.SuccessResponse(c, dashboard)
+}
+
+// ClosePoolAndNotify godoc
+// @Summary Close funding pool and notify exporter (Admin)
+// @Description Close a funding pool when deadline ends and send payment notification to exporter
+// @Tags Admin
+// @Security BearerAuth
+// @Produce json
+// @Param id path string true "Pool ID"
+// @Success 200 {object} models.ExporterPaymentNotificationData
+// @Router /admin/pools/{id}/close [post]
+func (h *FundingHandler) ClosePoolAndNotify(c *gin.Context) {
+	poolID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		utils.BadRequestError(c, "Invalid pool ID")
+		return
+	}
+
+	notificationData, err := h.fundingService.ClosePoolAndNotifyExporter(poolID)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, gin.H{
+		"message":           "Pool closed and payment notification sent to exporter",
+		"notification_data": notificationData,
+	})
+}
+
+// GetMarketplace godoc
+// @Summary Get marketplace pools with filters
+// @Description Get open funding pools for marketplace with grade and insured filters
+// @Tags Marketplace
+// @Security BearerAuth
+// @Produce json
+// @Param grade query string false "Filter by grade (A, B, C)"
+// @Param is_insured query bool false "Filter by insured status"
+// @Param min_amount query number false "Minimum pool amount"
+// @Param max_amount query number false "Maximum pool amount"
+// @Param page query int false "Page number"
+// @Param per_page query int false "Items per page"
+// @Success 200 {object} models.MarketplaceListResponse
+// @Router /marketplace [get]
+func (h *FundingHandler) GetMarketplace(c *gin.Context) {
+	var filter models.MarketplaceFilter
+	if err := c.ShouldBindQuery(&filter); err != nil {
+		utils.BadRequestError(c, err.Error())
+		return
+	}
+
+	if filter.Page == 0 {
+		filter.Page = 1
+	}
+	if filter.PerPage == 0 {
+		filter.PerPage = 10
+	}
+
+	response, err := h.fundingService.GetMarketplacePools(&filter)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, response)
+}
+
+// ExporterDisbursement godoc
+// @Summary Exporter disburse funds to investors
+// @Description Exporter pays back investors via escrow. Priority tranche paid first, catalyst gets remainder.
+// @Tags Exporter
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body services.ExporterDisbursementRequest true "Disbursement request"
+// @Success 200 {object} services.ExporterDisbursementResponse
+// @Router /exporter/disbursement [post]
+func (h *FundingHandler) ExporterDisbursement(c *gin.Context) {
+	exporterID := c.MustGet("user_id").(uuid.UUID)
+
+	var req services.ExporterDisbursementRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestError(c, err.Error())
+		return
+	}
+
+	response, err := h.fundingService.ExporterDisbursementToInvestors(exporterID, &req)
+	if err != nil {
+		utils.HandleAppError(c, err)
+		return
+	}
+
+	utils.SuccessResponse(c, response)
 }

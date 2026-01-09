@@ -265,6 +265,202 @@ func RunMigrations(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_transactions_tx_hash ON transactions(tx_hash);`,
 		`CREATE INDEX IF NOT EXISTS idx_nfts_token_id ON invoice_nfts(token_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_nfts_owner ON invoice_nfts(owner_address);`,
+
+		// =============================================
+		// VESSEL PLATFORM MIGRATIONS
+		// =============================================
+
+		// Add new columns to users table for VESSEL
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(50) UNIQUE;`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(20);`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS cooperative_agreement BOOLEAN DEFAULT false;`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS member_status VARCHAR(30) DEFAULT 'calon_anggota_pendana';`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_idr DECIMAL(20,2) DEFAULT 0;`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT false;`,
+
+		// OTP codes table for email verification
+		`CREATE TABLE IF NOT EXISTS otp_codes (
+			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			email VARCHAR(255) NOT NULL,
+			code VARCHAR(6) NOT NULL,
+			purpose VARCHAR(20) NOT NULL CHECK (purpose IN ('registration', 'login', 'password_reset')),
+			expires_at TIMESTAMP NOT NULL,
+			verified BOOLEAN DEFAULT false,
+			attempts INTEGER DEFAULT 0,
+			created_at TIMESTAMP DEFAULT NOW()
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_otp_codes_email ON otp_codes(email);`,
+		`CREATE INDEX IF NOT EXISTS idx_otp_codes_expires ON otp_codes(expires_at);`,
+
+		// MITRA applications table
+		`CREATE TABLE IF NOT EXISTS mitra_applications (
+			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+			company_name VARCHAR(255) NOT NULL,
+			company_type VARCHAR(50) NOT NULL DEFAULT 'PT',
+			npwp VARCHAR(16) NOT NULL,
+			annual_revenue VARCHAR(50) NOT NULL,
+			nib_document_url TEXT,
+			akta_pendirian_url TEXT,
+			ktp_direktur_url TEXT,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+			rejection_reason TEXT,
+			reviewed_by UUID REFERENCES users(id),
+			reviewed_at TIMESTAMP,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_mitra_applications_user ON mitra_applications(user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_mitra_applications_status ON mitra_applications(status);`,
+
+		// Balance transactions table
+		`CREATE TABLE IF NOT EXISTS balance_transactions (
+			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+			type VARCHAR(30) NOT NULL CHECK (type IN ('deposit', 'withdrawal', 'funding', 'return', 'refund', 'disbursement')),
+			amount DECIMAL(20,2) NOT NULL,
+			balance_before DECIMAL(20,2),
+			balance_after DECIMAL(20,2),
+			reference_id UUID,
+			reference_type VARCHAR(30),
+			description TEXT,
+			created_at TIMESTAMP DEFAULT NOW()
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_balance_tx_user ON balance_transactions(user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_balance_tx_type ON balance_transactions(type);`,
+
+		// Country tiers reference table for grading
+		`CREATE TABLE IF NOT EXISTS country_tiers (
+			country_code VARCHAR(3) PRIMARY KEY,
+			country_name VARCHAR(100) NOT NULL,
+			tier INTEGER NOT NULL CHECK (tier IN (1, 2, 3)),
+			flag_emoji VARCHAR(10)
+		);`,
+
+		// Insert default country tiers
+		`INSERT INTO country_tiers (country_code, country_name, tier, flag_emoji) VALUES
+			('USA', 'United States', 1, '🇺🇸'),
+			('DEU', 'Germany', 1, '🇩🇪'),
+			('JPN', 'Japan', 1, '🇯🇵'),
+			('GBR', 'United Kingdom', 1, '🇬🇧'),
+			('FRA', 'France', 1, '🇫🇷'),
+			('CHE', 'Switzerland', 1, '🇨🇭'),
+			('NLD', 'Netherlands', 1, '🇳🇱'),
+			('AUS', 'Australia', 1, '🇦🇺'),
+			('CAN', 'Canada', 1, '🇨🇦'),
+			('SGP', 'Singapore', 1, '🇸🇬'),
+			('KOR', 'South Korea', 1, '🇰🇷'),
+			('CHN', 'China', 2, '🇨🇳'),
+			('IND', 'India', 2, '🇮🇳'),
+			('BRA', 'Brazil', 2, '🇧🇷'),
+			('MEX', 'Mexico', 2, '🇲🇽'),
+			('THA', 'Thailand', 2, '🇹🇭'),
+			('MYS', 'Malaysia', 2, '🇲🇾'),
+			('VNM', 'Vietnam', 2, '🇻🇳'),
+			('PHL', 'Philippines', 2, '🇵🇭'),
+			('IDN', 'Indonesia', 2, '🇮🇩'),
+			('TUR', 'Turkey', 2, '🇹🇷'),
+			('SAU', 'Saudi Arabia', 2, '🇸🇦'),
+			('ARE', 'UAE', 2, '🇦🇪'),
+			('NGA', 'Nigeria', 3, '🇳🇬'),
+			('PAK', 'Pakistan', 3, '🇵🇰'),
+			('BGD', 'Bangladesh', 3, '🇧🇩'),
+			('EGY', 'Egypt', 3, '🇪🇬'),
+			('KEN', 'Kenya', 3, '🇰🇪'),
+			('ZAF', 'South Africa', 3, '🇿🇦'),
+			('ARG', 'Argentina', 3, '🇦🇷')
+		ON CONFLICT (country_code) DO NOTHING;`,
+
+		// Add buyer tier column
+		`ALTER TABLE buyers ADD COLUMN IF NOT EXISTS country_tier INTEGER DEFAULT 2;`,
+
+		// Add new columns to invoices for VESSEL tranches and grading
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS original_currency VARCHAR(10) DEFAULT 'USD';`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS original_amount DECIMAL(20,2);`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS idrx_amount DECIMAL(20,2);`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(15,6);`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS buffer_rate DECIMAL(5,4) DEFAULT 0.015;`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS priority_ratio DECIMAL(5,2) DEFAULT 80.00;`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS catalyst_ratio DECIMAL(5,2) DEFAULT 20.00;`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS priority_interest_rate DECIMAL(5,2);`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS catalyst_interest_rate DECIMAL(5,2);`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS grade VARCHAR(1);`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS grade_score INTEGER;`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS is_repeat_buyer BOOLEAN DEFAULT false;`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS funding_limit_percentage DECIMAL(5,2) DEFAULT 100.00;`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS is_insured BOOLEAN DEFAULT false;`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS document_complete_score INTEGER DEFAULT 0;`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS buyer_country_risk VARCHAR(10);`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS buyer_email VARCHAR(255);`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS funding_duration_days INTEGER DEFAULT 14;`,
+		`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_link TEXT;`,
+
+		// Add new columns to funding_pools for tranches
+		`ALTER TABLE funding_pools ADD COLUMN IF NOT EXISTS priority_target DECIMAL(20,2);`,
+		`ALTER TABLE funding_pools ADD COLUMN IF NOT EXISTS priority_funded DECIMAL(20,2) DEFAULT 0;`,
+		`ALTER TABLE funding_pools ADD COLUMN IF NOT EXISTS catalyst_target DECIMAL(20,2);`,
+		`ALTER TABLE funding_pools ADD COLUMN IF NOT EXISTS catalyst_funded DECIMAL(20,2) DEFAULT 0;`,
+		`ALTER TABLE funding_pools ADD COLUMN IF NOT EXISTS priority_interest_rate DECIMAL(5,2);`,
+		`ALTER TABLE funding_pools ADD COLUMN IF NOT EXISTS catalyst_interest_rate DECIMAL(5,2);`,
+		`ALTER TABLE funding_pools ADD COLUMN IF NOT EXISTS pool_currency VARCHAR(10) DEFAULT 'IDRX';`,
+		`ALTER TABLE funding_pools ADD COLUMN IF NOT EXISTS deadline TIMESTAMP;`,
+
+		// Add tranche column to investments
+		`ALTER TABLE investments ADD COLUMN IF NOT EXISTS tranche VARCHAR(10) DEFAULT 'priority';`,
+
+		// Risk questionnaire table for catalyst unlock
+		`CREATE TABLE IF NOT EXISTS risk_questionnaires (
+			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+			q1_answer INTEGER CHECK (q1_answer IN (1, 2, 3)),
+			q2_answer INTEGER CHECK (q2_answer IN (1, 2)),
+			q3_answer INTEGER CHECK (q3_answer IN (1, 2)),
+			catalyst_unlocked BOOLEAN DEFAULT false,
+			completed_at TIMESTAMP DEFAULT NOW(),
+			created_at TIMESTAMP DEFAULT NOW()
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_risk_questionnaires_user ON risk_questionnaires(user_id);`,
+
+		// Add document type for purchase_order
+		`ALTER TABLE invoice_documents DROP CONSTRAINT IF EXISTS invoice_documents_document_type_check;`,
+		`ALTER TABLE invoice_documents ADD CONSTRAINT invoice_documents_document_type_check CHECK (document_type IN (
+			'invoice_pdf', 'bill_of_lading', 'packing_list',
+			'certificate_of_origin', 'insurance', 'customs', 'other', 'purchase_order', 'commercial_invoice'
+		));`,
+
+		// Update users table role constraint to include admin
+		`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;`,
+		`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('exporter', 'investor', 'admin', 'mitra'));`,
+
+		// Add username index
+		`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);`,
+
+		// Importer payments table for non-user importers to pay
+		`CREATE TABLE IF NOT EXISTS importer_payments (
+			id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			invoice_id UUID REFERENCES invoices(id) ON DELETE CASCADE NOT NULL,
+			pool_id UUID REFERENCES funding_pools(id) NOT NULL,
+			buyer_email VARCHAR(255) NOT NULL,
+			buyer_name VARCHAR(255) NOT NULL,
+			amount_due DECIMAL(20,2) NOT NULL,
+			amount_paid DECIMAL(20,2) DEFAULT 0,
+			currency VARCHAR(10) DEFAULT 'IDRX',
+			payment_status VARCHAR(20) DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'overdue', 'canceled')),
+			due_date TIMESTAMP NOT NULL,
+			paid_at TIMESTAMP,
+			tx_hash VARCHAR(66),
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW()
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_importer_payments_invoice ON importer_payments(invoice_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_importer_payments_pool ON importer_payments(pool_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_importer_payments_status ON importer_payments(payment_status);`,
+
+		// Add tx_hash column to funding_pools for pool creation transparency
+		`ALTER TABLE funding_pools ADD COLUMN IF NOT EXISTS create_pool_tx_hash VARCHAR(66);`,
+
+		// Add investor return tx_hash to investments for transparency
+		`ALTER TABLE investments ADD COLUMN IF NOT EXISTS return_tx_hash VARCHAR(66);`,
 	}
 
 	for i, migration := range migrations {

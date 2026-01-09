@@ -2,7 +2,7 @@ package services
 
 import (
 	"github.com/google/uuid"
-	"github.com/receiv3/backend/internal/models"
+	"github.com/vessel/backend/internal/models"
 )
 
 // AuthServiceInterface defines the contract for authentication operations
@@ -37,6 +37,7 @@ type FundingServiceInterface interface {
 	GetInvestmentsByInvestor(investorID uuid.UUID, page, perPage int) (*models.InvestmentListResponse, error)
 	DisburseToExporter(poolID uuid.UUID) error
 	ProcessRepayment(invoiceID uuid.UUID, amount float64) error
+	ClosePoolAndNotifyExporter(poolID uuid.UUID) (*models.ExporterPaymentNotificationData, error)
 }
 
 // BlockchainServiceInterface defines the contract for blockchain operations

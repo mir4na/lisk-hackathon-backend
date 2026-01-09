@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/receiv3/backend/internal/models"
+	"github.com/vessel/backend/internal/models"
 )
 
 func SuccessResponse(c *gin.Context, data interface{}) {
@@ -54,6 +54,10 @@ func InternalServerError(c *gin.Context, message string) {
 
 func ConflictError(c *gin.Context, message string) {
 	ErrorResponse(c, http.StatusConflict, "CONFLICT", message)
+}
+
+func TooManyRequestsError(c *gin.Context, message string) {
+	ErrorResponse(c, http.StatusTooManyRequests, "TOO_MANY_REQUESTS", message)
 }
 
 func ValidationError(c *gin.Context, message string) {

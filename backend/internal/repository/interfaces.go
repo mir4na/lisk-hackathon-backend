@@ -2,19 +2,26 @@ package repository
 
 import (
 	"github.com/google/uuid"
-	"github.com/receiv3/backend/internal/models"
+	"github.com/vessel/backend/internal/models"
 )
 
 // UserRepositoryInterface defines the contract for user data operations
 type UserRepositoryInterface interface {
 	Create(user *models.User, profile *models.UserProfile) error
 	FindByEmail(email string) (*models.User, error)
+	FindByUsername(username string) (*models.User, error)
+	FindByEmailOrUsername(identifier string) (*models.User, error)
 	FindByID(id uuid.UUID) (*models.User, error)
 	FindProfileByUserID(userID uuid.UUID) (*models.UserProfile, error)
 	UpdateProfile(userID uuid.UUID, req *models.UpdateProfileRequest) error
 	UpdateWallet(userID uuid.UUID, walletAddress string) error
+	UpdateBalance(userID uuid.UUID, amount float64) error
 	SetVerified(userID uuid.UUID, verified bool) error
+	SetEmailVerified(userID uuid.UUID, verified bool) error
+	UpdateMemberStatus(userID uuid.UUID, status models.MemberStatus) error
+	UpdateRole(userID uuid.UUID, role models.UserRole) error
 	EmailExists(email string) (bool, error)
+	UsernameExists(username string) (bool, error)
 	WalletExists(wallet string) (bool, error)
 }
 
@@ -78,6 +85,7 @@ type FundingRepositoryInterface interface {
 	FindPoolByInvoiceID(invoiceID uuid.UUID) (*models.FundingPool, error)
 	FindOpenPools(page, perPage int) ([]models.FundingPool, int, error)
 	UpdatePoolFunding(id uuid.UUID, amount float64) error
+	UpdatePoolTrancheFunding(id uuid.UUID, amount float64, tranche models.TrancheType) error
 	UpdatePoolStatus(id uuid.UUID, status models.PoolStatus) error
 
 	// Investment methods
@@ -85,7 +93,11 @@ type FundingRepositoryInterface interface {
 	FindInvestmentByID(id uuid.UUID) (*models.Investment, error)
 	FindInvestmentsByInvestor(investorID uuid.UUID, page, perPage int) ([]models.Investment, int, error)
 	FindInvestmentsByPool(poolID uuid.UUID) ([]models.Investment, error)
+	FindInvestmentsByPoolAndTranche(poolID uuid.UUID, tranche models.TrancheType) ([]models.Investment, error)
 	UpdateInvestmentStatus(id uuid.UUID, status models.InvestmentStatus, actualReturn *float64) error
+
+	// Portfolio methods
+	GetInvestorPortfolio(investorID uuid.UUID) (*models.InvestorPortfolio, error)
 }
 
 // TransactionRepositoryInterface defines the contract for transaction data operations
@@ -99,6 +111,14 @@ type TransactionRepositoryInterface interface {
 	UpdateBlockInfo(id uuid.UUID, blockNumber, gasUsed int64) error
 }
 
+// RiskQuestionnaireRepositoryInterface defines the contract for risk questionnaire data operations
+type RiskQuestionnaireRepositoryInterface interface {
+	Create(rq *models.RiskQuestionnaire) error
+	FindByUserID(userID uuid.UUID) (*models.RiskQuestionnaire, error)
+	Update(rq *models.RiskQuestionnaire) error
+	IsCatalystUnlocked(userID uuid.UUID) (bool, error)
+}
+
 // Ensure implementations satisfy interfaces
 var _ UserRepositoryInterface = (*UserRepository)(nil)
 var _ KYCRepositoryInterface = (*KYCRepository)(nil)
@@ -106,3 +126,4 @@ var _ BuyerRepositoryInterface = (*BuyerRepository)(nil)
 var _ InvoiceRepositoryInterface = (*InvoiceRepository)(nil)
 var _ FundingRepositoryInterface = (*FundingRepository)(nil)
 var _ TransactionRepositoryInterface = (*TransactionRepository)(nil)
+var _ RiskQuestionnaireRepositoryInterface = (*RiskQuestionnaireRepository)(nil)

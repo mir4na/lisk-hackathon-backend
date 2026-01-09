@@ -6,7 +6,7 @@ import (
 	"log"
 
 	_ "github.com/lib/pq"
-	"github.com/receiv3/backend/internal/config"
+	"github.com/vessel/backend/internal/config"
 )
 
 func NewPostgresConnection(cfg *config.Config) (*sql.DB, error) {

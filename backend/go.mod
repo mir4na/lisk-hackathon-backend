@@ -1,4 +1,4 @@
-module github.com/receiv3/backend
+module github.com/vessel/backend
 
 go 1.21
 

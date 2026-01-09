@@ -3,9 +3,9 @@ package handlers
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/receiv3/backend/internal/models"
-	"github.com/receiv3/backend/internal/repository"
-	"github.com/receiv3/backend/internal/utils"
+	"github.com/vessel/backend/internal/models"
+	"github.com/vessel/backend/internal/repository"
+	"github.com/vessel/backend/internal/utils"
 )
 
 type UserHandler struct {

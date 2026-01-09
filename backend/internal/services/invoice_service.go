@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/receiv3/backend/internal/config"
-	"github.com/receiv3/backend/internal/models"
-	"github.com/receiv3/backend/internal/repository"
+	"github.com/vessel/backend/internal/config"
+	"github.com/vessel/backend/internal/models"
+	"github.com/vessel/backend/internal/repository"
 )
 
 type InvoiceService struct {

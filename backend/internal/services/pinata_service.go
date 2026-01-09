@@ -8,8 +8,8 @@ import (
 	"mime/multipart"
 	"net/http"
 
-	"github.com/receiv3/backend/internal/config"
-	"github.com/receiv3/backend/internal/utils"
+	"github.com/vessel/backend/internal/config"
+	"github.com/vessel/backend/internal/utils"
 )
 
 type PinataService struct {

@@ -5,9 +5,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/receiv3/backend/internal/models"
-	"github.com/receiv3/backend/internal/services"
-	"github.com/receiv3/backend/internal/utils"
+	"github.com/vessel/backend/internal/models"
+	"github.com/vessel/backend/internal/services"
+	"github.com/vessel/backend/internal/utils"
 )
 
 type InvoiceHandler struct {

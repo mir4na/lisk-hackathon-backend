@@ -29,8 +29,8 @@ describe("InvoiceNFT", function () {
 
   describe("Deployment", function () {
     it("Should set the correct name and symbol", async function () {
-      expect(await invoiceNFT.name()).to.equal("Receiv3 Invoice NFT");
-      expect(await invoiceNFT.symbol()).to.equal("R3INV");
+      expect(await invoiceNFT.name()).to.equal("VESSEL Invoice NFT");
+      expect(await invoiceNFT.symbol()).to.equal("VINV");
     });
 
     it("Should grant admin and minter roles to deployer", async function () {

@@ -1,7 +1,7 @@
 {
-  "name": "receiv3-smart-contract",
+  "name": "vessel-smart-contract",
   "version": "1.0.0",
-  "description": "Receiv3 NFT Invoice Factoring Smart Contracts",
+  "description": "VESSEL NFT Invoice Factoring Smart Contracts",
   "scripts": {
     "compile": "npx hardhat compile",
     "test": "npx hardhat test",
@@ -19,7 +19,7 @@
     "rwa",
     "lisk"
   ],
-  "author": "Receiv3",
+  "author": "VESSEL",
   "license": "MIT",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",

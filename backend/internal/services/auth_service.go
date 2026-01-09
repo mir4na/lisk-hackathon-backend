@@ -3,24 +3,36 @@ package services
 import (
 	"errors"
 
-	"github.com/receiv3/backend/internal/models"
-	"github.com/receiv3/backend/internal/repository"
-	"github.com/receiv3/backend/internal/utils"
+	"github.com/vessel/backend/internal/models"
+	"github.com/vessel/backend/internal/repository"
+	"github.com/vessel/backend/internal/utils"
 )
 
 type AuthService struct {
 	userRepo   repository.UserRepositoryInterface
 	jwtManager *utils.JWTManager
+	otpService *OTPService
 }
 
-func NewAuthService(userRepo repository.UserRepositoryInterface, jwtManager *utils.JWTManager) *AuthService {
+func NewAuthService(userRepo repository.UserRepositoryInterface, jwtManager *utils.JWTManager, otpService *OTPService) *AuthService {
 	return &AuthService{
 		userRepo:   userRepo,
 		jwtManager: jwtManager,
+		otpService: otpService,
 	}
 }
 
 func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginResponse, error) {
+	// Validate OTP token first
+	if s.otpService != nil && !s.otpService.ValidateOTPToken(req.OTPToken) {
+		return nil, errors.New("email not verified, please verify OTP first")
+	}
+
+	// Validate cooperative agreement
+	if !req.CooperativeAgreement {
+		return nil, errors.New("you must agree to VESSEL Cooperative Service terms")
+	}
+
 	// Check if email exists
 	exists, err := s.userRepo.EmailExists(req.Email)
 	if err != nil {
@@ -30,23 +42,41 @@ func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginRespon
 		return nil, errors.New("email already registered")
 	}
 
+	// Check if username exists
+	usernameExists, err := s.userRepo.UsernameExists(req.Username)
+	if err != nil {
+		return nil, err
+	}
+	if usernameExists {
+		return nil, errors.New("username already taken")
+	}
+
 	// Hash password
 	hashedPassword, err := utils.HashPassword(req.Password)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create user
+	// Create user with VESSEL fields
+	username := req.Username
+	phoneNumber := req.PhoneNumber
 	user := &models.User{
-		Email:        req.Email,
-		PasswordHash: hashedPassword,
-		Role:         req.Role,
-		IsVerified:   false,
-		IsActive:     true,
+		Email:                req.Email,
+		Username:             &username,
+		PhoneNumber:          &phoneNumber,
+		PasswordHash:         hashedPassword,
+		Role:                 req.Role,
+		IsVerified:           false,
+		IsActive:             true,
+		CooperativeAgreement: req.CooperativeAgreement,
+		MemberStatus:         models.MemberStatusCalonAnggotaPendana,
+		BalanceIDR:           0,
+		EmailVerified:        true, // Already verified via OTP
 	}
 
 	profile := &models.UserProfile{
 		FullName:    req.FullName,
+		Phone:       &phoneNumber,
 		CompanyName: req.CompanyName,
 		Country:     req.Country,
 	}
@@ -77,20 +107,21 @@ func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginRespon
 }
 
 func (s *AuthService) Login(req *models.LoginRequest) (*models.LoginResponse, error) {
-	user, err := s.userRepo.FindByEmail(req.Email)
+	// Support login with email or username
+	user, err := s.userRepo.FindByEmailOrUsername(req.EmailOrUsername)
 	if err != nil {
 		return nil, err
 	}
 	if user == nil {
-		return nil, errors.New("invalid email or password")
+		return nil, errors.New("invalid email/username or password")
 	}
 
 	if !utils.CheckPassword(req.Password, user.PasswordHash) {
-		return nil, errors.New("invalid email or password")
+		return nil, errors.New("invalid email/username or password")
 	}
 
 	if !user.IsActive {
-		return nil, errors.New("account is deactivated")
+		return nil, errors.New("account has been deactivated")
 	}
 
 	// Get profile

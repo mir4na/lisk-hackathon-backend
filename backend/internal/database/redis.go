@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/receiv3/backend/internal/config"
+	"github.com/vessel/backend/internal/config"
 	"github.com/redis/go-redis/v9"
 )
 
