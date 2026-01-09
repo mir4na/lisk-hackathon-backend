@@ -449,19 +449,7 @@ Document types: `nib`, `akta_pendirian`, `ktp_direktur`
 
 ## Buyers (Importir)
 
-### Create Buyer
-
-```bash
-curl -X POST http://localhost:8080/api/v1/buyers \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "company_name": "German Import GmbH",
-    "country": "Germany",
-    "contact_email": "buyer@german-import.de",
-    "contact_phone": "+49123456789"
-  }'
-```
+> ⚠️ **Note**: Buyer creation is not available through API. Buyers (importers) do not use this application - they receive payment links via email.
 
 ### List Buyers
 

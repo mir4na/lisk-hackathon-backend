@@ -151,8 +151,6 @@ func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginRespon
 		return nil, err
 	}
 
-	user.Profile = profile
-
 	return &models.LoginResponse{
 		User:         user,
 		AccessToken:  accessToken,

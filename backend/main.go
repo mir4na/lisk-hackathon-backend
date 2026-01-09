@@ -87,6 +87,9 @@ func main() {
 	rqHandler := handlers.NewRiskQuestionnaireHandler(rqService)
 	currencyHandler := handlers.NewCurrencyHandler(currencyService)
 
+	// Initialize profile middleware
+	profileMiddleware := middleware.NewProfileMiddleware(userRepo)
+
 	// Initialize Gin router
 	router := gin.Default()
 
@@ -132,9 +135,10 @@ func main() {
 		protected := v1.Group("")
 		protected.Use(middleware.AuthMiddleware(jwtManager))
 		{
-			// User routes
+			// User routes (no profile completion required for profile endpoints)
 			user := protected.Group("/user")
 			{
+				// Profile endpoints - don't require profile completion (allow user to complete profile)
 				user.GET("/profile", userHandler.GetProfile)
 				user.PUT("/profile", userHandler.UpdateProfile)
 				user.POST("/kyc", userHandler.SubmitKYC)
@@ -151,9 +155,18 @@ func main() {
 				// MITRA application routes (Flow 2)
 				mitra := user.Group("/mitra")
 				{
-					mitra.POST("/apply", mitraHandler.Apply)
-					mitra.GET("/status", mitraHandler.GetStatus)
-					mitra.POST("/documents", mitraHandler.UploadDocument)
+					userWithProfile.PUT("/wallet", userHandler.UpdateWallet)
+					userWithProfile.POST("/kyc", userHandler.SubmitKYC)
+					userWithProfile.GET("/kyc", userHandler.GetKYCStatus)
+					userWithProfile.GET("/balance", paymentHandler.GetBalance)
+
+					// MITRA application routes
+					mitra := userWithProfile.Group("/mitra")
+					{
+						mitra.POST("/apply", mitraHandler.Apply)
+						mitra.GET("/status", mitraHandler.GetStatus)
+						mitra.POST("/documents", mitraHandler.UploadDocument)
+					}
 				}
 			}
 
@@ -167,25 +180,24 @@ func main() {
 
 			// Payment routes (PROTOTYPE)
 			payments := protected.Group("/payments")
+			payments.Use(profileMiddleware.RequireProfileComplete())
 			{
 				payments.POST("/deposit", paymentHandler.Deposit)
 				payments.POST("/withdraw", paymentHandler.Withdraw)
 				payments.GET("/balance", paymentHandler.GetBalance)
 			}
 
-			// Buyer routes (exporter only)
+			// Buyer routes (exporter only, read-only - buyer creation removed as buyers don't use the app)
 			buyers := protected.Group("/buyers")
-			buyers.Use(middleware.ExporterOnly())
+			buyers.Use(middleware.ExporterOnly(), profileMiddleware.RequireProfileComplete())
 			{
-				buyers.POST("", buyerHandler.Create)
 				buyers.GET("", buyerHandler.List)
 				buyers.GET("/:id", buyerHandler.Get)
-				buyers.PUT("/:id", buyerHandler.Update)
-				buyers.DELETE("/:id", buyerHandler.Delete)
 			}
 
 			// Invoice routes (exporter/mitra for CRUD)
 			invoices := protected.Group("/invoices")
+			invoices.Use(profileMiddleware.RequireProfileComplete())
 			{
 				// Mitra/Exporter routes
 				invoices.POST("", middleware.ExporterOnly(), invoiceHandler.Create)
@@ -203,8 +215,9 @@ func main() {
 				invoices.POST("/:id/pool", middleware.AdminOnly(), fundingHandler.CreatePool)
 			}
 
-			// Funding/Investment routes (Marketplace)
+			// Funding/Investment routes (Marketplace) - require profile completion
 			pools := protected.Group("/pools")
+			pools.Use(profileMiddleware.RequireProfileComplete())
 			{
 				pools.GET("", fundingHandler.ListPools)
 				pools.GET("/:id", fundingHandler.GetPool)
@@ -212,15 +225,16 @@ func main() {
 
 			// Marketplace routes (with filters) - Flow 6
 			marketplace := protected.Group("/marketplace")
+			marketplace.Use(profileMiddleware.RequireProfileComplete())
 			{
 				marketplace.GET("", fundingHandler.GetMarketplace)
 				marketplace.GET("/:id/detail", fundingHandler.GetPoolDetail)       // Pool detail for investor
 				marketplace.POST("/calculate", fundingHandler.CalculateInvestment) // Investment calculator
 			}
 
-			// Risk Questionnaire routes (for investors)
+			// Risk Questionnaire routes (for investors) - require profile completion
 			riskQuestionnaire := protected.Group("/risk-questionnaire")
-			riskQuestionnaire.Use(middleware.InvestorOnly())
+			riskQuestionnaire.Use(middleware.InvestorOnly(), profileMiddleware.RequireProfileComplete())
 			{
 				riskQuestionnaire.GET("/questions", rqHandler.GetQuestions)
 				riskQuestionnaire.POST("", rqHandler.Submit)
@@ -240,14 +254,14 @@ func main() {
 
 			// Exporter/Mitra routes (Flow 8, 11)
 			exporter := protected.Group("/exporter")
-			exporter.Use(middleware.ExporterOnly())
+			exporter.Use(middleware.ExporterOnly(), profileMiddleware.RequireProfileComplete())
 			{
 				exporter.POST("/disbursement", fundingHandler.ExporterDisbursement) // Flow 11
 			}
 
 			// Mitra Dashboard (Flow 8)
 			mitraDashboard := protected.Group("/mitra")
-			mitraDashboard.Use(middleware.ExporterOnly())
+			mitraDashboard.Use(middleware.ExporterOnly(), profileMiddleware.RequireProfileComplete())
 			{
 				mitraDashboard.GET("/dashboard", fundingHandler.GetMitraDashboard)
 				mitraDashboard.GET("/invoices", fundingHandler.GetMitraActiveInvoices)
