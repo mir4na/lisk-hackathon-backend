@@ -72,7 +72,8 @@ func main() {
 	authService := services.NewAuthService(userRepo, jwtManager, otpService)
 	mitraService := services.NewMitraService(mitraRepo, userRepo, emailService, pinataService)
 	invoiceService := services.NewInvoiceService(invoiceRepo, fundingRepo, pinataService, cfg)
-	invoiceService.SetUserRepo(userRepo) // Set user repo for grade suggestion
+	invoiceService.SetUserRepo(userRepo)   // Set user repo for grade suggestion
+	invoiceService.SetMitraRepo(mitraRepo) // Set mitra repo for approval check
 	// Pass blockchainService to fundingService
 	fundingService := services.NewFundingService(fundingRepo, invoiceRepo, txRepo, userRepo, rqRepo, emailService, escrowService, blockchainService, cfg)
 	paymentService := services.NewPaymentService(userRepo, txRepo, fundingRepo, invoiceRepo) // Updated with fundingRepo and invoiceRepo for Flow 3

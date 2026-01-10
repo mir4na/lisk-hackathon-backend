@@ -38,6 +38,11 @@ func (s *InvoiceService) SetUserRepo(userRepo repository.UserRepositoryInterface
 	s.userRepo = userRepo
 }
 
+// SetMitraRepo sets the mitra repository (for checking mitra approval)
+func (s *InvoiceService) SetMitraRepo(mitraRepo *repository.MitraRepository) {
+	s.mitraRepo = mitraRepo
+}
+
 // CheckRepeatBuyer checks if buyer is a repeat buyer based on transaction history (Flow 4 Pre-condition)
 func (s *InvoiceService) CheckRepeatBuyer(mitraID uuid.UUID, buyerCompanyName string) (*models.RepeatBuyerCheckResponse, error) {
 	// Simplified logic since Buyer table is removed.
