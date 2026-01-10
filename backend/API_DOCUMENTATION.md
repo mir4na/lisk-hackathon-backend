@@ -112,7 +112,18 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
   }'
 ```
 
-### 5. Complete Profile (KYC & Bank Account) - MANDATORY
+### 5. Refresh Token
+Get a new access token using the refresh token (when access token expires).
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refresh_token": "<refresh_token_from_login>"
+  }'
+```
+
+### 6. Complete Profile (KYC & Bank Account) - MANDATORY
 Before transacting, users MUST complete their profile details, including NIK, KTP, and Bank Account.
 
 ```bash
@@ -134,7 +145,41 @@ curl -X POST http://localhost:8080/api/v1/user/complete-profile \
   }'
 ```
 
-### 6. Connect Crypto Wallet (Optional)
+### 7. Upload Documents (KTP/Selfie)
+Upload identity documents for KYC verification.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/user/documents \
+  -H "Authorization: Bearer <access_token>" \
+  -F "document_type=ktp" \
+  -F "file=@/path/to/ktp.jpg"
+```
+
+Supported document types: `ktp`, `selfie`
+
+### 8. Submit KYC
+Submit KYC data for admin review.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/user/kyc \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nik": "3201011234567890",
+    "ktp_photo_url": "https://storage.example.com/ktp/xxx.jpg",
+    "selfie_url": "https://storage.example.com/selfie/xxx.jpg"
+  }'
+```
+
+### 9. Get KYC Status
+Check current KYC verification status.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/user/kyc \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 10. Connect Crypto Wallet (Optional)
 Link a MetaMask wallet for on-chain transparency.
 
 ```bash
@@ -146,8 +191,25 @@ curl -X PUT http://localhost:8080/api/v1/user/wallet \
   }'
 ```
 
-### 7. Profile Management
+### 11. Profile Management
 View and update user details.
+
+**Get Profile:**
+```bash
+curl -X GET http://localhost:8080/api/v1/user/profile \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Update Profile:**
+```bash
+curl -X PUT http://localhost:8080/api/v1/user/profile \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "full_name": "John Doe Updated",
+    "phone": "081234567891"
+  }'
+```
 
 **Get Profile Data (Read Only):**
 ```bash
@@ -172,6 +234,30 @@ curl -X PUT http://localhost:8080/api/v1/user/profile/bank-account \
     "account_number": "0987654321",
     "account_name": "John Doe"
   }'
+```
+
+**Change Password:**
+```bash
+curl -X PUT http://localhost:8080/api/v1/user/profile/password \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "old_password": "password123",
+    "new_password": "newpassword456",
+    "confirm_password": "newpassword456"
+  }'
+```
+
+**Get Supported Banks:**
+```bash
+curl -X GET http://localhost:8080/api/v1/user/profile/banks \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Get Balance:**
+```bash
+curl -X GET http://localhost:8080/api/v1/user/balance \
+  -H "Authorization: Bearer <access_token>"
 ```
 
 ---
@@ -220,7 +306,23 @@ curl -X GET http://localhost:8080/api/v1/mitra/dashboard \
   -H "Authorization: Bearer <access_token>"
 ```
 
-### 5. Create Invoice
+### 5. Get Mitra Invoices
+Get all invoices created by mitra.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/mitra/invoices \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 6. Get Active Invoices (Needing Repayment)
+Get invoices that are currently funded and need repayment.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/mitra/invoices/active \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 7. Create Invoice
 Once verified, create a new invoice draft.
 
 ```bash
@@ -239,7 +341,41 @@ curl -X POST http://localhost:8080/api/v1/invoices \
   }'
 ```
 
-### 6. Upload Invoice Documents
+### 8. List My Invoices
+Get all invoices created by current mitra.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/invoices \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 9. Get Invoice Detail
+
+```bash
+curl -X GET http://localhost:8080/api/v1/invoices/<invoice_id> \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 10. Update Invoice (Draft Only)
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/invoices/<invoice_id> \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "buyer_name": "Updated Buyer Name",
+    "amount": 55000.00
+  }'
+```
+
+### 11. Delete Invoice (Draft Only)
+
+```bash
+curl -X DELETE http://localhost:8080/api/v1/invoices/<invoice_id> \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 12. Upload Invoice Documents
 Upload Bill of Lading, Commercial Invoice, etc.
 
 ```bash
@@ -249,7 +385,29 @@ curl -X POST http://localhost:8080/api/v1/invoices/<invoice_id>/documents \
   -F "file=@/path/to/bol.pdf"
 ```
 
-### 7. Submit Invoice
+Supported document types: `bill_of_lading`, `commercial_invoice`, `packing_list`, `certificate_of_origin`, `insurance`, `other`
+
+### 13. Get Invoice Documents
+
+```bash
+curl -X GET http://localhost:8080/api/v1/invoices/<invoice_id>/documents \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 14. Check Repeat Buyer
+Check if buyer has previous transaction history (affects grading).
+
+```bash
+curl -X POST http://localhost:8080/api/v1/invoices/check-repeat-buyer \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "buyer_name": "Global Coffee Importers Ltd",
+    "buyer_country": "United States"
+  }'
+```
+
+### 15. Submit Invoice
 Submit for admin review and grading.
 
 ```bash
@@ -257,21 +415,38 @@ curl -X POST http://localhost:8080/api/v1/invoices/<invoice_id>/submit \
   -H "Authorization: Bearer <access_token>"
 ```
 
-### 8. Request Funding (Tokenize)
-After admin approval, request funding to turn invoice into a pool.
+### 16. Request Funding
+After admin approval, request funding to create a pool from invoice.
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/invoices/<invoice_id>/funding-request \
+curl -X POST http://localhost:8080/api/v1/invoices/funding-request \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
-     "required_amount": 40000.00,
-     "duration_days": 60
+    "invoice_id": "<invoice_uuid>",
+    "required_amount": 40000.00,
+    "duration_days": 60
   }'
 ```
 
-### 9. Repayment (Create VA)
-When ready to repay the loan.
+### 17. Get Repayment Breakdown
+Get breakdown of repayment by tranche for a funded pool.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/mitra/pools/<pool_id>/breakdown \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 18. Get VA Payment Methods
+Get available virtual account payment methods.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/mitra/payment-methods \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 19. Create VA for Repayment
+Create virtual account for loan repayment.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/mitra/repayment/va \
@@ -284,13 +459,115 @@ curl -X POST http://localhost:8080/api/v1/mitra/repayment/va \
   }'
 ```
 
+### 20. Get VA Payment Status
+Check virtual account payment status.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/mitra/repayment/va/<va_id> \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 21. Simulate VA Payment (MVP Only)
+Simulate payment for testing purposes.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/mitra/repayment/va/<va_id>/simulate-pay \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 22. Request Disbursement (Exporter)
+Request disbursement after pool is funded.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/exporter/disbursement \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pool_id": "<pool_id>"
+  }'
+```
+
 ---
 
-## Flow 4: Investor Operations
+## Flow 4: Currency Conversion
+
+Endpoints for currency conversion and estimates.
+
+### 1. Get Locked Exchange Rate
+Get locked exchange rate for currency conversion (valid for limited time).
+
+```bash
+curl -X POST http://localhost:8080/api/v1/currency/convert \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from_currency": "USD",
+    "to_currency": "IDR",
+    "amount": 50000
+  }'
+```
+
+### 2. Get Supported Currencies
+Get list of supported currencies.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/currency/supported \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 3. Calculate Estimated Disbursement
+Calculate estimated disbursement amount in IDR.
+
+```bash
+curl -X GET "http://localhost:8080/api/v1/currency/disbursement-estimate?currency=USD&amount=50000" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+---
+
+## Flow 5: Payments (Prototype)
+
+Payment endpoints for deposit and withdrawal.
+
+### 1. Deposit
+Deposit funds to account.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/payments/deposit \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 10000000
+  }'
+```
+
+### 2. Withdraw
+Withdraw funds from account.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/payments/withdraw \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 5000000
+  }'
+```
+
+### 3. Get Balance
+Get current account balance.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/payments/balance \
+  -H "Authorization: Bearer <access_token>"
+```
+
+---
+
+## Flow 6: Investor Operations
 
 For users with `role: "investor"`.
 
-### 1. Marketplac (List Pools)
+### 1. Marketplace (List Pools)
 Browse available investment opportunities.
 
 ```bash
@@ -302,11 +579,49 @@ curl -X GET "http://localhost:8080/api/v1/marketplace?page=1&per_page=10" \
 See specific details about an invoice and its funding tranches.
 
 ```bash
+curl -X GET http://localhost:8080/api/v1/marketplace/<pool_id>/detail \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 3. Calculate Investment
+Calculate potential returns for an investment amount.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/marketplace/calculate \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pool_id": "<pool_uuid>",
+    "amount": 5000000,
+    "tranche": "priority"
+  }'
+```
+
+### 4. List Pools
+Get list of all funding pools.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/pools \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 5. Get Pool by ID
+Get specific pool details.
+
+```bash
 curl -X GET http://localhost:8080/api/v1/pools/<pool_id> \
   -H "Authorization: Bearer <access_token>"
 ```
 
-### 3. Risk Questionnaire (Prerequisite for Catalyst)
+### 6. Get Fundable Invoices
+Get list of invoices available for funding.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/invoices/fundable \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 7. Risk Questionnaire (Prerequisite for Catalyst)
 Must complete this to invest in Junior (Catalyst) Tranche.
 
 **Get Questions:**
@@ -327,7 +642,13 @@ curl -X POST http://localhost:8080/api/v1/risk-questionnaire \
   }'
 ```
 
-### 4. Invest
+**Get Status:**
+```bash
+curl -X GET http://localhost:8080/api/v1/risk-questionnaire/status \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 8. Invest
 Invest in a pool. Choose `priority` (Senior) or `catalyst` (Junior) tranche.
 
 **Priority Investment:**
@@ -361,7 +682,27 @@ curl -X POST http://localhost:8080/api/v1/investments \
   }'
 ```
 
-### 5. My Portfolio
+### 9. Confirm Investment
+Confirm a pending investment.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/investments/confirm \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "investment_id": "<investment_uuid>"
+  }'
+```
+
+### 10. My Investments
+Get list of all my investments.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/investments \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 11. My Portfolio
 View investment summary and returns.
 
 ```bash
@@ -369,30 +710,87 @@ curl -X GET http://localhost:8080/api/v1/investments/portfolio \
   -H "Authorization: Bearer <access_token>"
 ```
 
+### 12. Active Investments
+Get list of currently active investments.
+
+```bash
+curl -X GET http://localhost:8080/api/v1/investments/active \
+  -H "Authorization: Bearer <access_token>"
+```
+
 ---
 
-## Flow 5: Admin Operations
+## Flow 7: Admin Operations
 
-For users with `role: "admin"`.
+For users with `role: "admin"`. Default admin: `admin@vessel.com` / `adminpassword123`
 
-### 1. Approve KYC
-Review and approve user identity verification.
+### KYC Management
 
+**Get Pending KYC:**
+```bash
+curl -X GET http://localhost:8080/api/v1/admin/kyc/pending \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Approve KYC:**
 ```bash
 curl -X POST http://localhost:8080/api/v1/admin/kyc/<kyc_id>/approve \
   -H "Authorization: Bearer <access_token>"
 ```
 
-### 2. Approve Mitra Application
-Review and approve company verification.
+**Reject KYC:**
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/kyc/<kyc_id>/reject \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "Document not clear"
+  }'
+```
 
+### Mitra Application Management
+
+**Get Pending Applications:**
+```bash
+curl -X GET http://localhost:8080/api/v1/admin/mitra/pending \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Get Application Detail:**
+```bash
+curl -X GET http://localhost:8080/api/v1/admin/mitra/<application_id> \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Approve Mitra Application:**
 ```bash
 curl -X POST http://localhost:8080/api/v1/admin/mitra/<application_id>/approve \
   -H "Authorization: Bearer <access_token>"
 ```
 
-### 3. Review Invoice (Grading)
-Get grading suggestion and submit review decision.
+**Reject Mitra Application:**
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/mitra/<application_id>/reject \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "Missing NIB document"
+  }'
+```
+
+### Invoice Management
+
+**Get Pending Invoices:**
+```bash
+curl -X GET http://localhost:8080/api/v1/admin/invoices/pending \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Get Invoice Review Data (Split-screen):**
+```bash
+curl -X GET http://localhost:8080/api/v1/admin/invoices/<invoice_id>/review \
+  -H "Authorization: Bearer <access_token>"
+```
 
 **Get Grading Suggestion (AI/algo):**
 ```bash
@@ -411,7 +809,19 @@ curl -X POST http://localhost:8080/api/v1/admin/invoices/<invoice_id>/approve \
   }'
 ```
 
-### 4. Disburse Funds
+**Reject Invoice:**
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/invoices/<invoice_id>/reject \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "Insufficient documentation"
+  }'
+```
+
+### Pool Management
+
+**Disburse Funds:**
 When a pool is fully funded, disburse money to Mitra.
 
 ```bash
@@ -419,10 +829,150 @@ curl -X POST http://localhost:8080/api/v1/admin/pools/<pool_id>/disburse \
   -H "Authorization: Bearer <access_token>"
 ```
 
-### 5. Platform Revenue
+**Close Pool:**
+Close a pool and notify investors.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/pools/<pool_id>/close \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Process Repayment:**
+Process repayment for an invoice/pool.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/invoices/<invoice_id>/repay \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 55000000
+  }'
+```
+
+### Balance Management (MVP)
+
+**Grant Balance:**
+Grant balance to a user (for testing purposes).
+
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/balance/grant \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "<user_uuid>",
+    "amount": 10000000
+  }'
+```
+
+### Platform Revenue
+
+**Get Platform Revenue:**
 Check fees collected by the platform.
 
 ```bash
 curl -X GET http://localhost:8080/api/v1/admin/platform/revenue \
   -H "Authorization: Bearer <access_token>"
 ```
+
+---
+
+## API Route Summary
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/health` | No | Health check |
+| **Auth** |
+| POST | `/api/v1/auth/send-otp` | No | Send OTP email |
+| POST | `/api/v1/auth/verify-otp` | No | Verify OTP code |
+| POST | `/api/v1/auth/register` | No | Register user |
+| POST | `/api/v1/auth/login` | No | Login |
+| POST | `/api/v1/auth/refresh` | No | Refresh token |
+| **Public** |
+| GET | `/api/v1/public/payments/:payment_id` | No | Get payment info |
+| POST | `/api/v1/public/payments/:payment_id/pay` | No | Pay invoice |
+| **User** |
+| GET | `/api/v1/user/profile` | Yes | Get profile |
+| PUT | `/api/v1/user/profile` | Yes | Update profile |
+| POST | `/api/v1/user/kyc` | Yes | Submit KYC |
+| GET | `/api/v1/user/kyc` | Yes | Get KYC status |
+| POST | `/api/v1/user/complete-profile` | Yes | Complete profile |
+| POST | `/api/v1/user/documents` | Yes | Upload document |
+| GET | `/api/v1/user/balance` | Yes | Get balance |
+| GET | `/api/v1/user/profile/data` | Yes | Get personal data |
+| GET | `/api/v1/user/profile/bank-account` | Yes | Get bank account |
+| PUT | `/api/v1/user/profile/bank-account` | Yes | Change bank account |
+| PUT | `/api/v1/user/profile/password` | Yes | Change password |
+| GET | `/api/v1/user/profile/banks` | Yes | Get supported banks |
+| PUT | `/api/v1/user/wallet` | Yes | Update wallet |
+| **Mitra Application** |
+| POST | `/api/v1/user/mitra/apply` | Yes | Apply as mitra |
+| GET | `/api/v1/user/mitra/status` | Yes | Get application status |
+| POST | `/api/v1/user/mitra/documents` | Yes | Upload mitra document |
+| **Currency** |
+| POST | `/api/v1/currency/convert` | Yes | Get locked exchange rate |
+| GET | `/api/v1/currency/supported` | Yes | Get supported currencies |
+| GET | `/api/v1/currency/disbursement-estimate` | Yes | Calculate disbursement |
+| **Payments** |
+| POST | `/api/v1/payments/deposit` | Yes | Deposit |
+| POST | `/api/v1/payments/withdraw` | Yes | Withdraw |
+| GET | `/api/v1/payments/balance` | Yes | Get balance |
+| **Invoices** |
+| POST | `/api/v1/invoices` | Yes (Mitra) | Create invoice |
+| POST | `/api/v1/invoices/funding-request` | Yes (Mitra) | Request funding |
+| POST | `/api/v1/invoices/check-repeat-buyer` | Yes (Mitra) | Check repeat buyer |
+| GET | `/api/v1/invoices` | Yes (Mitra) | List my invoices |
+| GET | `/api/v1/invoices/fundable` | Yes | List fundable invoices |
+| GET | `/api/v1/invoices/:id` | Yes | Get invoice |
+| PUT | `/api/v1/invoices/:id` | Yes (Mitra) | Update invoice |
+| DELETE | `/api/v1/invoices/:id` | Yes (Mitra) | Delete invoice |
+| POST | `/api/v1/invoices/:id/submit` | Yes (Mitra) | Submit invoice |
+| POST | `/api/v1/invoices/:id/documents` | Yes (Mitra) | Upload document |
+| GET | `/api/v1/invoices/:id/documents` | Yes | Get documents |
+| POST | `/api/v1/invoices/:id/tokenize` | Yes (Admin) | Tokenize invoice |
+| POST | `/api/v1/invoices/:id/pool` | Yes (Admin) | Create pool |
+| **Pools** |
+| GET | `/api/v1/pools` | Yes | List pools |
+| GET | `/api/v1/pools/:id` | Yes | Get pool |
+| **Marketplace** |
+| GET | `/api/v1/marketplace` | Yes | List marketplace |
+| GET | `/api/v1/marketplace/:id/detail` | Yes | Get pool detail |
+| POST | `/api/v1/marketplace/calculate` | Yes | Calculate investment |
+| **Risk Questionnaire** |
+| GET | `/api/v1/risk-questionnaire/questions` | Yes (Investor) | Get questions |
+| POST | `/api/v1/risk-questionnaire` | Yes (Investor) | Submit answers |
+| GET | `/api/v1/risk-questionnaire/status` | Yes (Investor) | Get status |
+| **Investments** |
+| POST | `/api/v1/investments` | Yes (Investor) | Invest |
+| POST | `/api/v1/investments/confirm` | Yes (Investor) | Confirm investment |
+| GET | `/api/v1/investments` | Yes (Investor) | List my investments |
+| GET | `/api/v1/investments/portfolio` | Yes (Investor) | Get portfolio |
+| GET | `/api/v1/investments/active` | Yes (Investor) | Get active investments |
+| **Exporter** |
+| POST | `/api/v1/exporter/disbursement` | Yes (Mitra) | Request disbursement |
+| **Mitra Dashboard** |
+| GET | `/api/v1/mitra/dashboard` | Yes (Mitra) | Get dashboard |
+| GET | `/api/v1/mitra/invoices` | Yes (Mitra) | Get invoices |
+| GET | `/api/v1/mitra/invoices/active` | Yes (Mitra) | Get active invoices |
+| GET | `/api/v1/mitra/pools/:id/breakdown` | Yes (Mitra) | Get repayment breakdown |
+| GET | `/api/v1/mitra/payment-methods` | Yes (Mitra) | Get payment methods |
+| POST | `/api/v1/mitra/repayment/va` | Yes (Mitra) | Create VA payment |
+| GET | `/api/v1/mitra/repayment/va/:id` | Yes (Mitra) | Get VA status |
+| POST | `/api/v1/mitra/repayment/va/:id/simulate-pay` | Yes (Mitra) | Simulate payment |
+| **Admin** |
+| GET | `/api/v1/admin/kyc/pending` | Yes (Admin) | Get pending KYC |
+| POST | `/api/v1/admin/kyc/:id/approve` | Yes (Admin) | Approve KYC |
+| POST | `/api/v1/admin/kyc/:id/reject` | Yes (Admin) | Reject KYC |
+| GET | `/api/v1/admin/invoices/pending` | Yes (Admin) | Get pending invoices |
+| GET | `/api/v1/admin/invoices/:id/grade-suggestion` | Yes (Admin) | Get grade suggestion |
+| GET | `/api/v1/admin/invoices/:id/review` | Yes (Admin) | Get review data |
+| POST | `/api/v1/admin/invoices/:id/approve` | Yes (Admin) | Approve invoice |
+| POST | `/api/v1/admin/invoices/:id/reject` | Yes (Admin) | Reject invoice |
+| POST | `/api/v1/admin/pools/:id/disburse` | Yes (Admin) | Disburse funds |
+| POST | `/api/v1/admin/pools/:id/close` | Yes (Admin) | Close pool |
+| POST | `/api/v1/admin/invoices/:id/repay` | Yes (Admin) | Process repayment |
+| GET | `/api/v1/admin/mitra/pending` | Yes (Admin) | Get pending applications |
+| GET | `/api/v1/admin/mitra/:id` | Yes (Admin) | Get application detail |
+| POST | `/api/v1/admin/mitra/:id/approve` | Yes (Admin) | Approve application |
+| POST | `/api/v1/admin/mitra/:id/reject` | Yes (Admin) | Reject application |
+| POST | `/api/v1/admin/balance/grant` | Yes (Admin) | Grant balance |
+| GET | `/api/v1/admin/platform/revenue` | Yes (Admin) | Get platform revenue |
