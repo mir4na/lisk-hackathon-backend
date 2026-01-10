@@ -61,7 +61,7 @@ func RoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
 }
 
 func ExporterOnly() gin.HandlerFunc {
-	return RoleMiddleware("exporter", "admin")
+	return RoleMiddleware("exporter", "mitra", "admin")
 }
 
 func InvestorOnly() gin.HandlerFunc {

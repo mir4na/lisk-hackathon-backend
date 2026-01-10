@@ -427,7 +427,7 @@ func (h *InvoiceHandler) Approve(c *gin.Context) {
 	if h.blockchainService != nil && invoice != nil {
 		// Use system/platform address for NFT ownership since users don't have wallets
 		// NFT serves as on-chain proof of invoice, owned by platform
-		ownerAddress := "0x0000000000000000000000000000000000000000"
+		ownerAddress := h.blockchainService.GetPlatformAddress()
 		nft, _ = h.blockchainService.TokenizeInvoice(invoiceID, ownerAddress)
 	}
 
@@ -509,6 +509,22 @@ func (h *InvoiceHandler) GetPendingInvoices(c *gin.Context) {
 	response, err := h.invoiceService.GetPendingInvoices(params.Page, params.PerPage)
 	if err != nil {
 		utils.InternalServerError(c, "Failed to get pending invoices")
+		return
+	}
+
+	utils.SuccessResponse(c, response)
+}
+
+func (h *InvoiceHandler) GetApprovedInvoices(c *gin.Context) {
+	var params models.PaginationParams
+	if err := c.ShouldBindQuery(&params); err != nil {
+		params = models.PaginationParams{Page: 1, PerPage: 50}
+	}
+	params.Normalize()
+
+	response, err := h.invoiceService.GetApprovedInvoices(params.Page, params.PerPage)
+	if err != nil {
+		utils.InternalServerError(c, "Failed to get approved invoices")
 		return
 	}
 

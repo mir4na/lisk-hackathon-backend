@@ -243,13 +243,14 @@ type InvoiceListResponse struct {
 }
 
 type InvoiceFilter struct {
-	Status     *InvoiceStatus `json:"status,omitempty"`
-	BuyerID    *uuid.UUID     `json:"buyer_id,omitempty"`
-	ExporterID *uuid.UUID     `json:"exporter_id,omitempty"`
-	MinAmount  *float64       `json:"min_amount,omitempty"`
-	MaxAmount  *float64       `json:"max_amount,omitempty"`
-	Page       int            `json:"page"`
-	PerPage    int            `json:"per_page"`
+	Status     *InvoiceStatus  `json:"status,omitempty"`
+	Statuses   []InvoiceStatus `json:"statuses,omitempty"`
+	BuyerID    *uuid.UUID      `json:"buyer_id,omitempty"`
+	ExporterID *uuid.UUID      `json:"exporter_id,omitempty"`
+	MinAmount  *float64        `json:"min_amount,omitempty"`
+	MaxAmount  *float64        `json:"max_amount,omitempty"`
+	Page       int             `json:"page"`
+	PerPage    int             `json:"per_page"`
 }
 
 // RepeatBuyerCheckRequest is for checking if buyer is repeat buyer

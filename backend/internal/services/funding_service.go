@@ -55,8 +55,8 @@ func (s *FundingService) CreatePool(invoiceID uuid.UUID) (*models.FundingPool, e
 	if invoice == nil {
 		return nil, errors.New("invoice not found")
 	}
-	if invoice.Status != models.StatusTokenized {
-		return nil, errors.New("invoice must be tokenized before creating funding pool")
+	if invoice.Status != models.StatusApproved && invoice.Status != models.StatusTokenized {
+		return nil, errors.New("invoice must be approved before creating funding pool")
 	}
 	if invoice.AdvanceAmount == nil {
 		return nil, errors.New("advance amount not set")
@@ -123,6 +123,21 @@ func (s *FundingService) CreatePool(invoiceID uuid.UUID) (*models.FundingPool, e
 	if err := s.invoiceRepo.UpdateStatus(invoiceID, models.StatusFunding); err != nil {
 		return nil, err
 	}
+
+	// Record pool creation on blockchain
+	go func() {
+		if s.blockchainService != nil {
+			// Get NFT to get token ID
+			nft, err := s.invoiceRepo.FindNFTByInvoiceID(invoiceID)
+			if err == nil && nft != nil && nft.TokenID != nil {
+				if err := s.blockchainService.CreatePoolOnChain(*nft.TokenID); err != nil {
+					fmt.Printf("[BLOCKCHAIN] Failed to create pool on-chain: %v\n", err)
+				} else {
+					fmt.Printf("[BLOCKCHAIN] Pool created on-chain for tokenId=%d\n", *nft.TokenID)
+				}
+			}
+		}
+	}()
 
 	return pool, nil
 }

@@ -281,7 +281,8 @@ func main() {
 				// admin.POST("/kyc/:id/reject", userHandler.RejectKYC)
 
 				// Invoice approval routes (Flow 5)
-				admin.GET("/invoices/pending", invoiceHandler.GetPendingInvoices)              // List pending for review
+				admin.GET("/invoices/pending", invoiceHandler.GetPendingInvoices)
+				admin.GET("/invoices/approved", invoiceHandler.GetApprovedInvoices)
 				admin.GET("/invoices/:id/grade-suggestion", invoiceHandler.GetGradeSuggestion) // BE-ADM-1 logic
 				admin.GET("/invoices/:id/review", invoiceHandler.GetInvoiceReviewData)         // Split-screen data
 				admin.POST("/invoices/:id/approve", invoiceHandler.Approve)                    // Approve with grade

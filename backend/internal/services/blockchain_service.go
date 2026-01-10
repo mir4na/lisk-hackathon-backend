@@ -115,6 +115,10 @@ func (s *BlockchainService) GetTransactOpts(ctx context.Context) (*bind.Transact
 	return auth, nil
 }
 
+func (s *BlockchainService) GetPlatformAddress() string {
+	return s.fromAddress.Hex()
+}
+
 // ... PrepareNFTMetadata remains same ...
 func (s *BlockchainService) PrepareNFTMetadata(invoice *models.Invoice) (*NFTMetadata, error) {
 	metadata := &NFTMetadata{
@@ -191,8 +195,16 @@ func (s *BlockchainService) TokenizeInvoice(invoiceID uuid.UUID, ownerAddress st
 
 		// Convert amounts to BigInt
 		amountBig := new(big.Int).SetInt64(int64(invoice.Amount))
-		advanceBig := new(big.Int).SetInt64(int64(*invoice.AdvanceAmount))
-		interestBig := new(big.Int).SetInt64(int64(*invoice.InterestRate * 100)) // Scaled
+		var advanceAmount float64 = 0
+		if invoice.AdvanceAmount != nil {
+			advanceAmount = *invoice.AdvanceAmount
+		}
+		advanceBig := new(big.Int).SetInt64(int64(advanceAmount))
+		var interestRate float64 = 10
+		if invoice.InterestRate != nil {
+			interestRate = *invoice.InterestRate
+		}
+		interestBig := new(big.Int).SetInt64(int64(interestRate * 100)) // Scaled
 		issueDateBig := big.NewInt(invoice.IssueDate.Unix())
 		dueDateBig := big.NewInt(invoice.DueDate.Unix())
 
@@ -252,6 +264,27 @@ func (s *BlockchainService) TokenizeInvoice(invoiceID uuid.UUID, ownerAddress st
 	}
 
 	return nft, nil
+}
+
+func (s *BlockchainService) CreatePoolOnChain(tokenID int64) error {
+	if s.client == nil {
+		return nil // Skip if no blockchain client
+	}
+
+	auth, err := s.GetTransactOpts(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to get transact opts: %w", err)
+	}
+
+	tokenIDBig := big.NewInt(tokenID)
+
+	tx, err := s.poolContract.CreatePool(auth, tokenIDBig)
+	if err != nil {
+		return fmt.Errorf("failed to create pool on chain via contract: %w", err)
+	}
+
+	fmt.Printf("[BLOCKCHAIN] Pool creation submitted: TxHash=%s\n", tx.Hash().Hex())
+	return nil
 }
 
 func (s *BlockchainService) BurnNFT(invoiceID uuid.UUID) error {

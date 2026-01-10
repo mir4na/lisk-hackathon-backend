@@ -85,7 +85,9 @@ func (s *InvoiceService) CreateFundingRequest(mitraID uuid.UUID, req *models.Cre
 	if catalystRatio <= 0 {
 		catalystRatio = 20.0
 	}
-	if priorityRatio+catalystRatio != 100 {
+	// Use tolerance for floating point comparison
+	sum := priorityRatio + catalystRatio
+	if sum < 99.9 || sum > 100.1 {
 		return nil, errors.New("priority and catalyst ratios must sum to 100%")
 	}
 
@@ -594,6 +596,35 @@ func (s *InvoiceService) GetPendingInvoices(page, perPage int) (*models.InvoiceL
 		Status:  &status,
 		Page:    page,
 		PerPage: perPage,
+	}
+
+	invoices, total, err := s.invoiceRepo.FindAll(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	return &models.InvoiceListResponse{
+		Invoices:   invoices,
+		Total:      total,
+		Page:       page,
+		PerPage:    perPage,
+		TotalPages: models.CalculateTotalPages(total, perPage),
+	}, nil
+}
+
+func (s *InvoiceService) GetApprovedInvoices(page, perPage int) (*models.InvoiceListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 50
+	}
+
+	statuses := []models.InvoiceStatus{models.StatusApproved, models.StatusTokenized}
+	filter := &models.InvoiceFilter{
+		Statuses: statuses,
+		Page:     page,
+		PerPage:  perPage,
 	}
 
 	invoices, total, err := s.invoiceRepo.FindAll(filter)

@@ -22,8 +22,13 @@ func NewProfileMiddleware(userRepo repository.UserRepositoryInterface) *ProfileM
 func (m *ProfileMiddleware) RequireProfileComplete() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(uuid.UUID)
+		role := c.GetString("user_role")
 
-		// Check if profile exists and is complete
+		if role == "admin" {
+			c.Next()
+			return
+		}
+
 		profile, err := m.userRepo.FindProfileByUserID(userID)
 		if err != nil {
 			utils.InternalServerError(c, "Failed to verify profile status")
@@ -31,7 +36,6 @@ func (m *ProfileMiddleware) RequireProfileComplete() gin.HandlerFunc {
 			return
 		}
 
-		// Profile must exist and have full_name
 		if profile == nil || profile.FullName == "" {
 			utils.ForbiddenError(c, "Please complete your profile first. Update your profile with full_name to continue.")
 			c.Abort()

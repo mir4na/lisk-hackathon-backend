@@ -208,8 +208,10 @@ func (r *InvoiceRepository) Update(invoice *models.Invoice) error {
 	query := `
 		UPDATE invoices
 		SET invoice_number = $1, currency = $2, amount = $3, issue_date = $4, due_date = $5,
-		    description = $6, updated_at = $7
-		WHERE id = $8
+		    description = $6, status = $7, grade = $8, grade_score = $9, interest_rate = $10,
+		    priority_interest_rate = $11, catalyst_interest_rate = $12, advance_amount = $13,
+		    updated_at = $14
+		WHERE id = $15
 	`
 	_, err := r.db.Exec(
 		query,
@@ -219,6 +221,13 @@ func (r *InvoiceRepository) Update(invoice *models.Invoice) error {
 		invoice.IssueDate,
 		invoice.DueDate,
 		invoice.Description,
+		invoice.Status,
+		invoice.Grade,
+		invoice.GradeScore,
+		invoice.InterestRate,
+		invoice.PriorityInterestRate,
+		invoice.CatalystInterestRate,
+		invoice.AdvanceAmount,
 		time.Now(),
 		invoice.ID,
 	)
@@ -424,6 +433,18 @@ func (r *InvoiceRepository) FindAll(filter *models.InvoiceFilter) ([]models.Invo
 		countQuery += ` AND status = $` + string(rune('0'+argCount))
 		args = append(args, *filter.Status)
 	}
+	if len(filter.Statuses) > 0 {
+		countQuery += ` AND status IN (`
+		for i, status := range filter.Statuses {
+			argCount++
+			if i > 0 {
+				countQuery += ", "
+			}
+			countQuery += `$` + string(rune('0'+argCount))
+			args = append(args, status)
+		}
+		countQuery += `)`
+	}
 	if filter.ExporterID != nil {
 		argCount++
 		countQuery += ` AND exporter_id = $` + string(rune('0'+argCount))
@@ -450,6 +471,18 @@ func (r *InvoiceRepository) FindAll(filter *models.InvoiceFilter) ([]models.Invo
 		queryArgCount++
 		query += ` AND status = $` + string(rune('0'+queryArgCount))
 		queryArgs = append(queryArgs, *filter.Status)
+	}
+	if len(filter.Statuses) > 0 {
+		query += ` AND status IN (`
+		for i, status := range filter.Statuses {
+			queryArgCount++
+			if i > 0 {
+				query += ", "
+			}
+			query += `$` + string(rune('0'+queryArgCount))
+			queryArgs = append(queryArgs, status)
+		}
+		query += `)`
 	}
 	if filter.ExporterID != nil {
 		queryArgCount++
