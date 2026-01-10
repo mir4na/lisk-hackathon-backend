@@ -35,7 +35,7 @@ type FundingServiceInterface interface {
 	GetOpenPools(page, perPage int) (*models.PoolListResponse, error)
 	Invest(investorID uuid.UUID, req *models.InvestRequest) (*models.Investment, error)
 	GetInvestmentsByInvestor(investorID uuid.UUID, page, perPage int) (*models.InvestmentListResponse, error)
-	DisburseToExporter(poolID uuid.UUID) error
+	DisburseToExporter(poolID uuid.UUID) (*models.ExporterPaymentNotificationData, error)
 	ProcessRepayment(invoiceID uuid.UUID, amount float64) error
 	ClosePoolAndNotifyExporter(poolID uuid.UUID) (*models.ExporterPaymentNotificationData, error)
 }

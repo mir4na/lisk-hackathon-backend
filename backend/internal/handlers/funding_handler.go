@@ -178,7 +178,7 @@ func (h *FundingHandler) Disburse(c *gin.Context) {
 		return
 	}
 
-	if err := h.fundingService.DisburseToExporter(poolID); err != nil {
+	if _, err := h.fundingService.DisburseToExporter(poolID); err != nil {
 		utils.HandleAppError(c, err)
 		return
 	}

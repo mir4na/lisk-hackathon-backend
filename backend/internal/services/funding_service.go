@@ -425,7 +425,7 @@ func (s *FundingService) Invest(investorID uuid.UUID, req *models.InvestRequest)
 		return nil, err
 	}
 
-	// Create transaction record (using IDR - abstracted escrow for MVP)
+	// Create transaction record (using IDR - abstracted escrow)
 	tx := &models.Transaction{
 		InvoiceID: &pool.InvoiceID,
 		UserID:    &investorID,
@@ -443,7 +443,7 @@ func (s *FundingService) Invest(investorID uuid.UUID, req *models.InvestRequest)
 
 		// Trigger automatic disbursement to mitra (Flow 7)
 		go func() {
-			if err := s.DisburseToExporter(req.PoolID); err != nil {
+			if _, err := s.DisburseToExporter(req.PoolID); err != nil {
 				// Log error but don't fail investment
 				// In production, this would alert admins
 				_ = err
@@ -492,36 +492,61 @@ func (s *FundingService) GetInvestorPortfolio(investorID uuid.UUID) (*models.Inv
 	return s.fundingRepo.GetInvestorPortfolio(investorID)
 }
 
-func (s *FundingService) DisburseToExporter(poolID uuid.UUID) error {
+// DisburseToExporter disburses funds to exporter, updates statuses, and sends notification
+func (s *FundingService) DisburseToExporter(poolID uuid.UUID) (*models.ExporterPaymentNotificationData, error) {
 	pool, err := s.fundingRepo.FindPoolByID(poolID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if pool == nil {
-		return errors.New("pool not found")
+		return nil, errors.New("pool not found")
 	}
-	if pool.Status != models.PoolStatusFilled {
-		return errors.New("pool must be filled before disbursement")
+	// Allow Filled (auto) or Open (manual close) status
+	if pool.Status != models.PoolStatusFilled && pool.Status != models.PoolStatusOpen {
+		return nil, errors.New("pool must be open or filled before disbursement")
+	}
+
+	// For manual close (Open status), ensure there is some funding
+	if pool.FundedAmount == 0 {
+		return nil, errors.New("pool has no funding")
 	}
 
 	// Update pool status
 	if err := s.fundingRepo.UpdatePoolStatus(poolID, models.PoolStatusDisbursed); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Update invoice status
 	if err := s.invoiceRepo.UpdateStatus(pool.InvoiceID, models.StatusFunded); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Get invoice for exporter info
 	invoice, _ := s.invoiceRepo.FindByID(pool.InvoiceID)
+	if invoice == nil {
+		return nil, errors.New("invoice not found")
+	}
 
-	// Calculate platform fee (dummy escrow)
+	// Get exporter details
+	exporter, err := s.userRepo.FindByID(invoice.ExporterID)
+	if err != nil || exporter == nil {
+		return nil, errors.New("exporter not found")
+	}
+
+	// Get exporter profile for name
+	exporterProfile, _ := s.userRepo.FindProfileByUserID(invoice.ExporterID)
+	exporterName := "Exporter"
+	if exporterProfile != nil && exporterProfile.FullName != "" {
+		exporterName = exporterProfile.FullName
+	} else if exporterProfile != nil && exporterProfile.CompanyName != nil {
+		exporterName = *exporterProfile.CompanyName
+	}
+
+	// Calculate platform fee
 	platformFee := pool.FundedAmount * (s.cfg.PlatformFeePercentage / 100)
 	disbursementAmount := pool.FundedAmount - platformFee
 
-	// Create advance payment transaction (dummy escrow simulation)
+	// Create disbursement transaction
 	tx := &models.Transaction{
 		InvoiceID: &pool.InvoiceID,
 		UserID:    &invoice.ExporterID,
@@ -529,9 +554,66 @@ func (s *FundingService) DisburseToExporter(poolID uuid.UUID) error {
 		Amount:    disbursementAmount,
 		Currency:  "IDRX",
 		Status:    models.TxStatusPending,
-		Notes:     stringPtr("Disbursement to exporter via dummy escrow"),
+		Notes:     stringPtr("Disbursement to exporter (funding completed)"),
 	}
 	s.txRepo.Create(tx)
+
+	// --- Prepare Notification Data ---
+
+	// Get investments to calculate interest/repayment plan
+	investments, _ := s.fundingRepo.FindInvestmentsByPool(pool.ID)
+
+	var investorDetails []models.InvestorPaymentDetail
+	totalExpectedReturn := 0.0
+	for _, inv := range investments {
+		totalExpectedReturn += inv.ExpectedReturn
+
+		var interestRate float64
+		if inv.Tranche == models.TranchePriority {
+			interestRate = pool.PriorityInterestRate
+		} else {
+			interestRate = pool.CatalystInterestRate
+		}
+
+		investorDetails = append(investorDetails, models.InvestorPaymentDetail{
+			InvestorID:     inv.InvestorID.String(),
+			Amount:         inv.Amount,
+			InterestRate:   interestRate,
+			ExpectedReturn: inv.ExpectedReturn,
+			Tranche:        string(inv.Tranche),
+		})
+	}
+
+	totalInterest := totalExpectedReturn - pool.FundedAmount
+	totalAmountDue := totalExpectedReturn + platformFee
+
+	// Generate payment ID
+	paymentID := uuid.New().String()
+	paymentLink := s.cfg.FrontendURL + "/payment/" + paymentID
+
+	notificationData := &models.ExporterPaymentNotificationData{
+		InvoiceID:       invoice.ID.String(),
+		InvoiceNumber:   invoice.InvoiceNumber,
+		ExporterName:    exporterName,
+		BuyerName:       invoice.BuyerName,
+		BuyerEmail:      "", // Removed as per requirement
+		PrincipalAmount: pool.FundedAmount,
+		TotalInterest:   totalInterest,
+		PlatformFee:     platformFee,
+		TotalAmountDue:  totalAmountDue,
+		Currency:        pool.PoolCurrency,
+		DueDate:         invoice.DueDate,
+		InvestorDetails: investorDetails,
+		PaymentID:       paymentID,
+		PaymentLink:     paymentLink,
+	}
+
+	// Send email to exporter
+	if s.emailService != nil {
+		if err := s.emailService.SendExporterPaymentNotification(exporter.Email, notificationData); err != nil {
+			fmt.Printf("Failed to send payment notification email: %v\n", err)
+		}
+	}
 
 	// On-Chain Transparency: Record disbursement
 	go func() {
@@ -543,7 +625,7 @@ func (s *FundingService) DisburseToExporter(poolID uuid.UUID) error {
 		}
 	}()
 
-	return nil
+	return notificationData, nil
 }
 
 // ProcessRepayment processes repayment from importer and distributes to investors
@@ -745,144 +827,8 @@ func stringPtr(s string) *string {
 // It disburses funds to exporter and sends payment notification to exporter's email
 // containing invoice details for the importer to pay
 func (s *FundingService) ClosePoolAndNotifyExporter(poolID uuid.UUID) (*models.ExporterPaymentNotificationData, error) {
-	pool, err := s.fundingRepo.FindPoolByID(poolID)
-	if err != nil {
-		return nil, err
-	}
-	if pool == nil {
-		return nil, errors.New("pool not found")
-	}
-	if pool.Status != models.PoolStatusOpen && pool.Status != models.PoolStatusFilled {
-		return nil, errors.New("pool is not open or filled")
-	}
-
-	// Check if pool has any funding
-	if pool.FundedAmount == 0 {
-		return nil, errors.New("pool has no funding")
-	}
-
-	// Get invoice details
-	invoice, err := s.invoiceRepo.FindByID(pool.InvoiceID)
-	if err != nil {
-		return nil, err
-	}
-	if invoice == nil {
-		return nil, errors.New("invoice not found")
-	}
-
-	// Get exporter details
-	exporter, err := s.userRepo.FindByID(invoice.ExporterID)
-	if err != nil {
-		return nil, err
-	}
-	if exporter == nil {
-		return nil, errors.New("exporter not found")
-	}
-
-	// Get exporter profile for name
-	exporterProfile, _ := s.userRepo.FindProfileByUserID(invoice.ExporterID)
-	exporterName := "Exporter"
-	if exporterProfile != nil && exporterProfile.FullName != "" {
-		exporterName = exporterProfile.FullName
-	} else if exporterProfile != nil && exporterProfile.CompanyName != nil {
-		exporterName = *exporterProfile.CompanyName
-	}
-
-	// Get buyer details
-	// buyerEmail := "" - skipped due to removal
-
-	// Get all investments for this pool
-	investments, err := s.fundingRepo.FindInvestmentsByPool(pool.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Calculate total interest and build investor details
-	var investorDetails []models.InvestorPaymentDetail
-	totalExpectedReturn := 0.0
-	for _, inv := range investments {
-		totalExpectedReturn += inv.ExpectedReturn
-
-		var interestRate float64
-		if inv.Tranche == models.TranchePriority {
-			interestRate = pool.PriorityInterestRate
-		} else {
-			interestRate = pool.CatalystInterestRate
-		}
-
-		investorDetails = append(investorDetails, models.InvestorPaymentDetail{
-			InvestorID:     inv.InvestorID.String(),
-			Amount:         inv.Amount,
-			InterestRate:   interestRate,
-			ExpectedReturn: inv.ExpectedReturn,
-			Tranche:        string(inv.Tranche),
-		})
-	}
-
-	totalInterest := totalExpectedReturn - pool.FundedAmount
-
-	// Calculate platform fee that mitra needs to pay
-	platformFee := pool.FundedAmount * (s.cfg.PlatformFeePercentage / 100)
-
-	// Total that mitra must pay = investor returns + platform fee for app
-	totalAmountDue := totalExpectedReturn + platformFee
-
-	// Generate payment ID
-	paymentID := uuid.New().String()
-	paymentLink := s.cfg.FrontendURL + "/payment/" + paymentID
-
-	// Update pool status to disbursed
-	if err := s.fundingRepo.UpdatePoolStatus(poolID, models.PoolStatusDisbursed); err != nil {
-		return nil, err
-	}
-
-	// Update invoice status to funded
-	if err := s.invoiceRepo.UpdateStatus(pool.InvoiceID, models.StatusFunded); err != nil {
-		return nil, err
-	}
-
-	// Calculate disbursement amount (funds to exporter after platform fee)
-	disbursementAmount := pool.FundedAmount - platformFee
-
-	// Create advance payment transaction (funds to exporter)
-	tx := &models.Transaction{
-		InvoiceID: &pool.InvoiceID,
-		UserID:    &invoice.ExporterID,
-		Type:      models.TxTypeAdvancePayment,
-		Amount:    disbursementAmount,
-		Currency:  "IDRX",
-		Status:    models.TxStatusPending,
-		Notes:     stringPtr("Disbursement to exporter - pool deadline reached"),
-	}
-	s.txRepo.Create(tx)
-
-	// Prepare notification data
-	notificationData := &models.ExporterPaymentNotificationData{
-		InvoiceID:       invoice.ID.String(),
-		InvoiceNumber:   invoice.InvoiceNumber,
-		ExporterName:    exporterName,
-		BuyerName:       invoice.BuyerName,
-		BuyerEmail:      "",
-		PrincipalAmount: pool.FundedAmount,
-		TotalInterest:   totalInterest,
-		PlatformFee:     platformFee,
-		TotalAmountDue:  totalAmountDue,
-		Currency:        pool.PoolCurrency,
-		DueDate:         invoice.DueDate,
-		InvestorDetails: investorDetails,
-		PaymentID:       paymentID,
-		PaymentLink:     paymentLink,
-	}
-
-	// Send email to exporter
-	if s.emailService != nil {
-		if err := s.emailService.SendExporterPaymentNotification(exporter.Email, notificationData); err != nil {
-			// Log error but don't fail the operation
-			// Email sending failure shouldn't block the disbursement
-		}
-	}
-
-	return notificationData, nil
+	// Refactored to reuse DisburseToExporter which now handles notification
+	return s.DisburseToExporter(poolID)
 }
 
 // ExporterDisbursementRequest represents request for exporter to disburse to investors

@@ -226,8 +226,6 @@ func (s *BlockchainService) TokenizeInvoice(invoiceID uuid.UUID, ownerAddress st
 		txHash = tx.Hash().Hex()
 
 		// NOTE: In production, we should wait for event to get TokenID.
-		// For MVP, we will use a hash-based ID or fetch it later.
-		// Let's assume we fetch it or use a placeholder if async.
 		tokenID = int64(time.Now().UnixNano() % 1000000)
 	} else {
 		tokenID = int64(time.Now().UnixNano() % 1000000)
@@ -257,7 +255,7 @@ func (s *BlockchainService) TokenizeInvoice(invoiceID uuid.UUID, ownerAddress st
 }
 
 func (s *BlockchainService) BurnNFT(invoiceID uuid.UUID) error {
-	// ... (Simulated for now, can be updated later) ...
+	// Implementation pending update
 	return nil
 }
 
