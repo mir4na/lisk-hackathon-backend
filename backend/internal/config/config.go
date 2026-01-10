@@ -104,10 +104,10 @@ func Load() (*Config, error) {
 	}
 
 	// Verify critical config
-	smtpUser := os.Getenv("SMTP_USERNAME")
-	fmt.Printf("[CONFIG] Debug: SMTP_USERNAME='%s' (Len: %d)\n", smtpUser, len(smtpUser))
+	smtpUser := getEnv("SMTP_USERNAME", getEnv("SMTP_USER", ""))
+	fmt.Printf("[CONFIG] Debug: Found SMTP user='%s' (Len: %d)\n", smtpUser, len(smtpUser))
 	if smtpUser == "" {
-		fmt.Println("[CONFIG] CRITICAL WARNING: SMTP_USERNAME is empty! Email sending will fail.")
+		fmt.Println("[CONFIG] CRITICAL WARNING: SMTP username is empty! Email sending will fail.")
 	}
 
 	jwtExpiry, _ := strconv.Atoi(getEnv("JWT_EXPIRY_HOURS", "24"))
@@ -170,8 +170,8 @@ func Load() (*Config, error) {
 		// SMTP Settings for OTP
 		SMTPHost:     getEnv("SMTP_HOST", ""),
 		SMTPPort:     smtpPort,
-		SMTPUsername: getEnv("SMTP_USERNAME", ""),
-		SMTPPassword: strings.ReplaceAll(getEnv("SMTP_PASSWORD", ""), " ", ""),
+		SMTPUsername: getEnv("SMTP_USERNAME", getEnv("SMTP_USER", "")),
+		SMTPPassword: strings.ReplaceAll(getEnv("SMTP_PASSWORD", getEnv("SMTP_PASS", "")), " ", ""),
 		SMTPFrom:     getEnv("SMTP_FROM", ""),
 
 		// OTP Settings

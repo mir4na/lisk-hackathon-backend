@@ -8,26 +8,14 @@ services:
     container_name: vessel-backend
     ports:
       - "8080:8080"
+    env_file:
+      - .env
     environment:
-      - PORT=8080
-      - DATABASE_URL=${DATABASE_URL}
-      - BLOCKCHAIN_RPC_URL=${BLOCKCHAIN_RPC_URL}
+      - REDIS_HOST=redis
+      - POSTGRES_HOST=postgres
     depends_on:
       - postgres
       - redis
-    networks:
-      - vessel-network
-    restart: unless-stopped
-
-  smart-contract:
-    build:
-      context: ./smart-contract
-      dockerfile: Dockerfile
-    container_name: vessel-hardhat
-    ports:
-      - "8545:8545"
-    environment:
-      - PRIVATE_KEY=${PRIVATE_KEY}
     networks:
       - vessel-network
     restart: unless-stopped

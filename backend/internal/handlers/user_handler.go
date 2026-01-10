@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/gin-gonic/gin"
@@ -675,4 +676,70 @@ func (h *UserHandler) UploadDocument(c *gin.Context) {
 		"url":           url,
 		"hash":          ipfsHash,
 	})
+}
+
+// ==================== Admin User Management ====================
+
+// ListUsersResponse represents the response for listing users
+type ListUsersResponse struct {
+	Users      []repository.UserListItem `json:"users"`
+	Total      int                       `json:"total"`
+	Page       int                       `json:"page"`
+	PerPage    int                       `json:"per_page"`
+	TotalPages int                       `json:"total_pages"`
+}
+
+// ListUsers godoc
+// @Summary List all users (Admin Only)
+// @Description Get a paginated list of all users with optional filters
+// @Tags Admin
+// @Security BearerAuth
+// @Produce json
+// @Param page query int false "Page number" default(1)
+// @Param per_page query int false "Items per page" default(10)
+// @Param role query string false "Filter by role (investor, mitra, admin)"
+// @Param search query string false "Search by email, username, or name"
+// @Success 200 {object} ListUsersResponse
+// @Router /admin/users [get]
+func (h *UserHandler) ListUsers(c *gin.Context) {
+	// Parse pagination
+	page := 1
+	perPage := 10
+
+	if p := c.Query("page"); p != "" {
+		if parsed, err := parseInt(p); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	if pp := c.Query("per_page"); pp != "" {
+		if parsed, err := parseInt(pp); err == nil && parsed > 0 && parsed <= 100 {
+			perPage = parsed
+		}
+	}
+
+	roleFilter := c.Query("role")
+	search := c.Query("search")
+
+	users, total, err := h.userRepo.FindAllUsers(page, perPage, roleFilter, search)
+	if err != nil {
+		utils.InternalServerError(c, "Failed to list users")
+		return
+	}
+
+	totalPages := (total + perPage - 1) / perPage
+
+	utils.SuccessResponse(c, ListUsersResponse{
+		Users:      users,
+		Total:      total,
+		Page:       page,
+		PerPage:    perPage,
+		TotalPages: totalPages,
+	})
+}
+
+// parseInt is a helper to parse int from string
+func parseInt(s string) (int, error) {
+	var result int
+	_, err := fmt.Sscanf(s, "%d", &result)
+	return result, err
 }

@@ -599,3 +599,88 @@ func (r *UserRepository) UpdateWalletAddress(userID uuid.UUID, walletAddress str
 	_, err := r.db.Exec(query, walletAddress, time.Now(), userID)
 	return err
 }
+
+// ==================== Admin Methods ====================
+
+// UserListItem represents a user item in the admin list
+type UserListItem struct {
+	ID              uuid.UUID           `json:"id"`
+	Email           string              `json:"email"`
+	Username        *string             `json:"username,omitempty"`
+	Role            models.UserRole     `json:"role"`
+	MemberStatus    models.MemberStatus `json:"member_status"`
+	BalanceIDR      float64             `json:"balance_idr"`
+	IsVerified      bool                `json:"is_verified"`
+	ProfileComplete bool                `json:"profile_completed"`
+	FullName        string              `json:"full_name,omitempty"`
+	CreatedAt       time.Time           `json:"created_at"`
+}
+
+// FindAllUsers returns a paginated list of users for admin
+func (r *UserRepository) FindAllUsers(page, perPage int, roleFilter string, search string) ([]UserListItem, int, error) {
+	offset := (page - 1) * perPage
+
+	// Build query with optional filters
+	baseQuery := `
+		SELECT u.id, u.email, u.username, u.role, u.member_status, u.balance_idr,
+		       u.is_verified, u.profile_completed, COALESCE(p.full_name, ''), u.created_at
+		FROM users u
+		LEFT JOIN user_profiles p ON u.id = p.user_id
+		WHERE u.is_active = true
+	`
+	countQuery := `SELECT COUNT(*) FROM users u WHERE u.is_active = true`
+
+	args := []interface{}{}
+	argIndex := 1
+
+	if roleFilter != "" {
+		baseQuery += fmt.Sprintf(" AND u.role = $%d", argIndex)
+		countQuery += fmt.Sprintf(" AND u.role = $%d", argIndex)
+		args = append(args, roleFilter)
+		argIndex++
+	}
+
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		baseQuery += fmt.Sprintf(" AND (u.email ILIKE $%d OR u.username ILIKE $%d OR p.full_name ILIKE $%d)", argIndex, argIndex, argIndex)
+		countQuery += fmt.Sprintf(" AND (u.email ILIKE $%d OR u.username ILIKE $%d)", argIndex, argIndex)
+		args = append(args, searchPattern)
+		argIndex++
+	}
+
+	// Get total count
+	var total int
+	err := r.db.QueryRow(countQuery, args...).Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Add pagination
+	baseQuery += fmt.Sprintf(" ORDER BY u.created_at DESC LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
+	args = append(args, perPage, offset)
+
+	rows, err := r.db.Query(baseQuery, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var users []UserListItem
+	for rows.Next() {
+		var user UserListItem
+		var username sql.NullString
+		err := rows.Scan(
+			&user.ID, &user.Email, &username, &user.Role, &user.MemberStatus,
+			&user.BalanceIDR, &user.IsVerified, &user.ProfileComplete, &user.FullName, &user.CreatedAt,
+		)
+		if err != nil {
+			return nil, 0, err
+		}
+		if username.Valid {
+			user.Username = &username.String
+		}
+		users = append(users, user)
+	}
+
+	return users, total, nil
+}

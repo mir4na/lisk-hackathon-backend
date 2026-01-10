@@ -271,6 +271,9 @@ func main() {
 			admin := protected.Group("/admin")
 			admin.Use(middleware.AdminOnly())
 			{
+				// User management
+				admin.GET("/users", userHandler.ListUsers)
+
 				admin.GET("/kyc/pending", userHandler.GetPendingKYC)
 				admin.POST("/kyc/:id/approve", userHandler.ApproveKYC)
 				admin.POST("/kyc/:id/reject", userHandler.RejectKYC)
