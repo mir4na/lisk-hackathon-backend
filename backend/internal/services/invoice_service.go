@@ -14,6 +14,7 @@ type InvoiceService struct {
 	invoiceRepo repository.InvoiceRepositoryInterface
 	fundingRepo repository.FundingRepositoryInterface
 	userRepo    repository.UserRepositoryInterface
+	mitraRepo   *repository.MitraRepository
 	pinata      PinataServiceInterface
 	cfg         *config.Config
 }
@@ -53,6 +54,17 @@ func (s *InvoiceService) CheckRepeatBuyer(mitraID uuid.UUID, buyerCompanyName st
 
 // CreateFundingRequest creates a new invoice funding request (Flow 4)
 func (s *InvoiceService) CreateFundingRequest(mitraID uuid.UUID, req *models.CreateInvoiceFundingRequest) (*models.Invoice, error) {
+	// Check if Mitra is approved before allowing invoice creation
+	if s.mitraRepo != nil {
+		mitraApp, err := s.mitraRepo.FindByUserID(mitraID)
+		if err != nil {
+			return nil, errors.New("failed to verify mitra status")
+		}
+		if mitraApp == nil || mitraApp.Status != models.MitraStatusApproved {
+			return nil, errors.New("hanya mitra yang sudah disetujui yang dapat membuat invoice")
+		}
+	}
+
 	// Validate funding duration
 	fundingDurationDays := req.FundingDurationDays
 	if fundingDurationDays <= 0 {
