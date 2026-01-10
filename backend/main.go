@@ -45,7 +45,7 @@ func main() {
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(db)
 	kycRepo := repository.NewKYCRepository(db)
-
+	// buyerRepo removed
 	invoiceRepo := repository.NewInvoiceRepository(db)
 	fundingRepo := repository.NewFundingRepository(db)
 	txRepo := repository.NewTransactionRepository(db)
@@ -82,7 +82,7 @@ func main() {
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, otpService)
 	userHandler := handlers.NewUserHandler(userRepo, kycRepo, pinataService)
-
+	// buyerHandler removed
 	invoiceHandler := handlers.NewInvoiceHandler(invoiceService, blockchainService)
 	fundingHandler := handlers.NewFundingHandler(fundingService)
 	mitraHandler := handlers.NewMitraHandler(mitraService)
@@ -185,6 +185,8 @@ func main() {
 				payments.GET("/balance", paymentHandler.GetBalance)
 			}
 
+			// Buyer routes removed (deprecated, information now on Invoice)
+
 			// Invoice routes (exporter/mitra for CRUD)
 			invoices := protected.Group("/invoices")
 			invoices.Use(profileMiddleware.RequireProfileComplete())
@@ -272,6 +274,11 @@ func main() {
 				// User management
 				admin.GET("/users", userHandler.ListUsers)
 
+				// Admin KYC routes removed
+				// admin.GET("/kyc/pending", userHandler.GetPendingKYC)
+				// admin.POST("/kyc/:id/approve", userHandler.ApproveKYC)
+				// admin.POST("/kyc/:id/reject", userHandler.RejectKYC)
+
 				// Invoice approval routes (Flow 5)
 				admin.GET("/invoices/pending", invoiceHandler.GetPendingInvoices)              // List pending for review
 				admin.GET("/invoices/:id/grade-suggestion", invoiceHandler.GetGradeSuggestion) // BE-ADM-1 logic
@@ -286,6 +293,7 @@ func main() {
 
 				// Admin Mitra Application routes (Flow 2)
 				admin.GET("/mitra/pending", mitraHandler.GetPendingApplications)
+				admin.GET("/mitra/:id", mitraHandler.GetApplication)
 				admin.POST("/mitra/:id/approve", mitraHandler.Approve)
 				admin.POST("/mitra/:id/reject", mitraHandler.Reject)
 
