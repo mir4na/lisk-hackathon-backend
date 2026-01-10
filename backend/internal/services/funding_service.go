@@ -392,6 +392,21 @@ func (s *FundingService) Invest(investorID uuid.UUID, req *models.InvestRequest)
 	// No time factor - interest is calculated flat from total principal
 	expectedReturn := req.Amount + (req.Amount * interestRate / 100)
 
+	// Check user balance (Flow 2: Payment Integration)
+	user, err := s.userRepo.FindByID(investorID)
+	if err != nil {
+		return nil, err
+	}
+	if user.BalanceIDR < req.Amount {
+		return nil, errors.New("insufficient balance")
+	}
+
+	// Deduct balance
+	newBalance := user.BalanceIDR - req.Amount
+	if err := s.userRepo.UpdateBalance(investorID, newBalance); err != nil {
+		return nil, fmt.Errorf("failed to deduct balance: %w", err)
+	}
+
 	investment := &models.Investment{
 		PoolID:         req.PoolID,
 		InvestorID:     investorID,

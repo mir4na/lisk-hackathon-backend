@@ -19,6 +19,7 @@ type MemberStatus string
 
 const (
 	MemberStatusCalonAnggotaPendana MemberStatus = "calon_anggota_pendana"
+	MemberStatusCalonAnggotaMitra   MemberStatus = "calon_anggota_mitra"
 	MemberStatusMemberMitra         MemberStatus = "member_mitra"
 	MemberStatusAdmin               MemberStatus = "admin"
 )

@@ -66,7 +66,7 @@ func (s *AuthService) Register(req *models.RegisterRequest) (*models.LoginRespon
 	// Determine member status based on role
 	memberStatus := models.MemberStatusCalonAnggotaPendana
 	if role == models.RoleMitra {
-		memberStatus = models.MemberStatusMemberMitra
+		memberStatus = models.MemberStatusCalonAnggotaMitra
 	}
 
 	// Create user without profile (profile will be completed later)

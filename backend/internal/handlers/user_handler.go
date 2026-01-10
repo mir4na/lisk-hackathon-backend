@@ -240,7 +240,11 @@ func (h *UserHandler) getBankName(code string) string {
 }
 
 // Admin handlers
+// func (h *UserHandler) GetPendingKYC(c *gin.Context) { ... }
+// func (h *UserHandler) ApproveKYC(c *gin.Context) { ... }
+// func (h *UserHandler) RejectKYC(c *gin.Context) { ... }
 
+/*
 // GetPendingKYC godoc
 // @Summary Get pending KYC requests (Admin)
 // @Description Get all pending KYC verification requests
@@ -343,6 +347,7 @@ func (h *UserHandler) RejectKYC(c *gin.Context) {
 	kyc, _ := h.kycRepo.FindByID(kycID)
 	utils.SuccessResponse(c, kyc)
 }
+*/
 
 // ==================== Profile Management (Flow 2) ====================
 

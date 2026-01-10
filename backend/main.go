@@ -274,9 +274,10 @@ func main() {
 				// User management
 				admin.GET("/users", userHandler.ListUsers)
 
-				admin.GET("/kyc/pending", userHandler.GetPendingKYC)
-				admin.POST("/kyc/:id/approve", userHandler.ApproveKYC)
-				admin.POST("/kyc/:id/reject", userHandler.RejectKYC)
+				// Admin KYC routes removed
+				// admin.GET("/kyc/pending", userHandler.GetPendingKYC)
+				// admin.POST("/kyc/:id/approve", userHandler.ApproveKYC)
+				// admin.POST("/kyc/:id/reject", userHandler.RejectKYC)
 
 				// Invoice approval routes (Flow 5)
 				admin.GET("/invoices/pending", invoiceHandler.GetPendingInvoices)              // List pending for review
